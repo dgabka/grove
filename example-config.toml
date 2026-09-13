@@ -1,0 +1,20 @@
+roots = ["/Users/you/repos"]
+max_depth = 3
+# Use Nerd Font branch glyphs in linked-worktree picker labels.
+nerd_fonts = true
+
+[[presets]]
+name = "default"
+
+[[presets.windows]]
+name = "pi"
+[[presets.windows.panes]]
+command = ["pi"]
+
+[[presets.windows]]
+name = "nvim"
+[[presets.windows.panes]]
+command = ["nvim", "-S"]
+
+[[presets.windows]]
+name = "shell"
