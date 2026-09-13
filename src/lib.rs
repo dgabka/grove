@@ -207,39 +207,19 @@ pub fn open(config: &Config, tmux: &Tmux) -> Result<()> {
     tmux.navigate(&id)
 }
 
-pub fn switch(tmux: &Tmux, repo_only: bool) -> Result<()> {
+pub fn switch(tmux: &Tmux) -> Result<()> {
     let nerd_fonts = config::optional_nerd_fonts()?;
     let sessions = tmux.sessions()?;
-    let current_repo = if repo_only {
-        let in_grove = std::env::var_os("TMUX")
-            .and_then(|_| tmux.current_session().ok().flatten())
-            .and_then(|id| {
-                sessions
-                    .iter()
-                    .find(|s| s.id == id)
-                    .and_then(|s| s.repo.clone())
-            });
-        in_grove.or_else(|| git::repo_id_from_dir(Path::new(".")).ok().flatten())
-    } else {
-        None
-    };
-    if repo_only && current_repo.is_none() {
-        bail!("cannot determine repository: run inside a Grove session or Git worktree");
-    }
-    let filtered: Vec<&Session> = sessions
-        .iter()
-        .filter(|session| !repo_only || session.repo.as_deref() == current_repo.as_deref())
-        .collect();
-    if filtered.is_empty() {
+    if sessions.is_empty() {
         bail!("no matching tmux sessions")
     };
-    let choices: Vec<_> = filtered
+    let choices: Vec<_> = sessions
         .iter()
         .enumerate()
         .map(|(i, s)| (i.to_string(), s.label(nerd_fonts)))
         .collect();
     if let Some(id) = choose(&choices, "session> ")? {
-        let session = filtered
+        let session = sessions
             .get(id.parse::<usize>()?)
             .context("fzf selected an unknown session")?;
         tmux.navigate(&session.id)?;
@@ -342,7 +322,7 @@ mod tests {
     }
 
     #[test]
-    fn worktree_reuse_and_repository_grouping_use_metadata() {
+    fn worktree_reuse_uses_metadata() {
         let sessions = vec![
             Session {
                 id: "$1".into(),
@@ -375,11 +355,5 @@ mod tests {
                 .id,
             "$1"
         );
-        let grouped = sessions
-            .iter()
-            .filter(|session| session.repo.as_deref() == Some("repo-a"))
-            .collect::<Vec<_>>();
-        assert_eq!(grouped.len(), 1);
-        assert_eq!(grouped[0].id, "$1");
     }
 }

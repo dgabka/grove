@@ -18,7 +18,6 @@ A pane `command` is an argv array; Grove passes its elements to tmux as separate
 
 - `grove` — select a normal checkout directly, or select a `[bare]` repository and then one of its active linked worktrees. Reuse the checkout's Grove session, or select a layout and create one.
 - `grove switch` — select any running tmux session.
-- `grove switch --repo` — select running Grove sessions for the current repository. It first uses current Grove-session metadata, then falls back to Git discovery from the current directory.
 
 Cancelling either repository/worktree picker or the layout picker is a no-op. Bare entries show `repository [bare]` and full path, never a branch. A bare repository is never a session checkout; if it has no eligible worktrees, Grove prints a message and exits without a layout picker or session creation. Main checkout labels show repository and full path without a branch; linked worktrees show `repository/worktree`, full path, and their branch (`nerd_fonts = true`, the default, uses a Nerd Font branch glyph; `false` uses `branch:`). Grove stores the plain label and branch separately from repository and checkout identity, so both pickers render the current font preference. Older label-only sessions remain readable. `grove switch` reads this presentation setting when the config exists and still works with no config file.
 
@@ -35,7 +34,6 @@ Deterministic process-count regressions measure 5 Git calls for one ordinary che
 ```tmux
 bind g display-popup -E -w 80% -h 80% 'grove'
 bind G display-popup -E -w 80% -h 80% 'grove switch'
-bind r display-popup -E -w 80% -h 80% 'grove switch --repo'
 ```
 
 The popup command is a tmux configuration example; Grove itself invokes Git, tmux, and fzf with process argument arrays.

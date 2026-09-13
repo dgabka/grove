@@ -151,13 +151,6 @@ impl Tmux {
             .collect()
     }
 
-    pub fn current_session(&self) -> Result<Option<String>> {
-        match self.refs(&["display-message", "-p", "#{session_id}"]) {
-            Ok(output) => Ok(Some(output.trim_end().to_owned())),
-            Err(_) => Ok(None),
-        }
-    }
-
     pub fn navigate(&self, id: &str) -> Result<()> {
         let args = if std::env::var_os("TMUX").is_some() {
             vec!["switch-client".into(), "-t".into(), id.into()]

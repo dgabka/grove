@@ -112,19 +112,6 @@ fn canonical(path: &Path) -> Result<PathBuf> {
     path.canonicalize()
         .with_context(|| format!("canonicalize {}", path.display()))
 }
-pub fn repo_id_from_dir(dir: &Path) -> Result<Option<String>> {
-    match git(
-        dir,
-        &["rev-parse", "--path-format=absolute", "--git-common-dir"],
-    ) {
-        Ok(common) => Ok(Some(
-            canonical(Path::new(&common))?
-                .to_string_lossy()
-                .into_owned(),
-        )),
-        Err(_) => Ok(None),
-    }
-}
 fn bare_marker(path: &Path) -> bool {
     path.join("HEAD").is_file() && path.join("objects").is_dir() && path.join("refs").is_dir()
 }
