@@ -243,7 +243,19 @@ fn normal_bypasses_worktree_picker_bare_uses_it_and_metadata_reuse_skips_layout(
         assert!(fixture.text("picker-1.args").contains("repository> "));
         assert!(fixture.text("picker-2.args").contains("layout> "));
         let initial = fixture.text("picker-1.input");
-        assert!(initial.contains("repo [bare]  "));
+        assert!(initial.contains(if nerd_fonts {
+            "\u{f418}  repo  "
+        } else {
+            "[bare]  repo  "
+        }));
+        let marker_width = if nerd_fonts { 1 } else { 6 };
+        assert!(initial.starts_with(&format!("0\t{}ordinary", " ".repeat(marker_width + 2))));
+        assert_eq!(
+            fixture.text("picker-2.input"),
+            concat!("0\tshell (one shell window)\0", "1\tcustom\0")
+        );
+        assert!(initial.contains("~/repos/ordinary"));
+        assert!(initial.contains("~/repos/repo.git"));
         assert!(!initial.contains("feature/topic"));
         assert!(!initial.contains("branch:") && !initial.contains(''));
         let log = fixture.text("tmux.log");
@@ -257,6 +269,9 @@ fn normal_bypasses_worktree_picker_bare_uses_it_and_metadata_reuse_skips_layout(
         assert!(fixture.text("picker-2.args").contains("worktree> "));
         assert!(fixture.text("picker-3.args").contains("layout> "));
         let linked = fixture.text("picker-2.input");
+        assert!(linked.starts_with("0\t   repo/topic"));
+        assert!(!linked.contains('\u{f418}') && !linked.contains("[bare]"));
+        assert!(linked.contains("~/repos/repo.git/feature/topic"));
         assert!(linked.contains(if nerd_fonts {
             " feature/topic"
         } else {
@@ -286,6 +301,49 @@ fn normal_bypasses_worktree_picker_bare_uses_it_and_metadata_reuse_skips_layout(
     fixture.run(&["1", "0", "0"], None, true);
     assert!(fixture.text("picker-2.input").contains(" renamed"));
     assert!(fixture.text("tmux.log").contains("-s\0repo/topic\0"));
+}
+
+#[test]
+fn repository_and_worktree_picker_columns_align() {
+    use unicode_width::UnicodeWidthStr;
+
+    let fixture = Fixture::new();
+    let bare = fixture.linked.parent().unwrap().parent().unwrap();
+    let other = bare.join("界e\u{301}");
+    git(
+        bare,
+        &["worktree", "add", "-b", "other", other.to_str().unwrap()],
+    );
+    fixture.run(&["1", "cancel"], None, false);
+    for (stage, count) in [(1, 3), (2, 2)] {
+        let input = fixture.text(&format!("picker-{stage}.input"));
+        let labels: Vec<_> = input
+            .strip_suffix('\0')
+            .unwrap()
+            .split('\0')
+            .enumerate()
+            .map(|(i, record)| {
+                let (id, label) = record.split_once('\t').unwrap();
+                assert_eq!(id, i.to_string());
+                assert!(!label.ends_with(' '));
+                label
+            })
+            .collect();
+        assert_eq!(labels.len(), count);
+        let path_columns: Vec<_> = labels
+            .iter()
+            .map(|label| label[..label.find("~/repos/").unwrap()].width())
+            .collect();
+        assert!(path_columns.iter().all(|column| *column == path_columns[0]));
+        if stage == 2 {
+            let branch_columns: Vec<_> = labels
+                .iter()
+                .map(|label| label[..label.find("branch:").unwrap()].width())
+                .collect();
+            assert_eq!(branch_columns[0], branch_columns[1]);
+        }
+    }
+    assert!(fixture.text("tmux.log").is_empty());
 }
 
 #[test]

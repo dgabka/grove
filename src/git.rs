@@ -27,20 +27,37 @@ pub struct Checkout {
     pub linked: bool,
 }
 impl Checkout {
-    pub fn base_label(&self) -> String {
+    pub fn display_name(&self) -> String {
         if self.linked {
             format!(
-                "{}/{}  {}",
+                "{}/{}",
                 self.repo_name,
                 self.worktree
                     .file_name()
                     .and_then(|x| x.to_str())
-                    .unwrap_or("worktree"),
-                self.worktree.display()
+                    .unwrap_or("worktree")
             )
         } else {
-            format!("{}  {}", self.repo_name, self.worktree.display())
+            self.repo_name.clone()
         }
+    }
+
+    pub fn base_label(&self) -> String {
+        format!("{}  {}", self.display_name(), self.worktree.display())
+    }
+
+    /// Picker fields: marker, name, path, branch.
+    pub fn columns(&self, nerd_fonts: bool) -> [String; 4] {
+        [
+            String::new(),
+            self.display_name(),
+            self.worktree.to_string_lossy().into_owned(),
+            crate::branch_label(
+                self.linked
+                    .then(|| self.branch.as_deref().unwrap_or("detached")),
+                nerd_fonts,
+            ),
+        ]
     }
 
     pub fn label(&self, nerd_fonts: bool) -> String {
@@ -71,6 +88,18 @@ pub struct BareRepository {
 }
 
 impl Repository {
+    pub fn columns(&self, nerd_fonts: bool) -> [String; 4] {
+        match self {
+            Self::Checkout(checkout) => checkout.columns(nerd_fonts),
+            Self::Bare(bare) => [
+                if nerd_fonts { "\u{f418}" } else { "[bare]" }.into(),
+                display_name(&bare.common),
+                bare.path.to_string_lossy().into_owned(),
+                String::new(),
+            ],
+        }
+    }
+
     pub fn label(&self, nerd_fonts: bool) -> String {
         match self {
             Self::Checkout(checkout) => checkout.label(nerd_fonts),
@@ -425,6 +454,29 @@ mod tests {
         assert!(!main.label(true).contains("main"));
         assert!(linked.label(true).contains("/tmp/wt   feature"));
         assert!(linked.label(false).contains("/tmp/wt  branch: feature"));
+        assert_eq!(main.columns(true), ["", "repo", "/tmp/repo", ""]);
+        assert_eq!(
+            linked.columns(true),
+            ["", "repo/wt", "/tmp/wt", " feature"]
+        );
+        assert_eq!(
+            linked.columns(false),
+            ["", "repo/wt", "/tmp/wt", "branch: feature"]
+        );
+        let detached = Checkout {
+            branch: None,
+            ..linked
+        };
+        assert_eq!(detached.columns(false)[3], "branch: detached");
+        let bare = Repository::Bare(BareRepository {
+            common: "/tmp/repo.git".into(),
+            path: "/tmp/repo.git".into(),
+        });
+        assert_eq!(
+            bare.columns(true),
+            ["\u{f418}", "repo", "/tmp/repo.git", ""]
+        );
+        assert_eq!(bare.columns(false), ["[bare]", "repo", "/tmp/repo.git", ""]);
     }
     #[test]
     fn normal_discovery_does_not_expand_external_worktrees() {

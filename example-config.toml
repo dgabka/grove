@@ -1,6 +1,6 @@
 roots = ["/Users/you/repos"]
 max_depth = 3
-# Use Nerd Font branch glyphs in linked-worktree picker labels.
+# Use Nerd Font branch/tree markers for bare repositories and branch glyphs for linked worktrees.
 nerd_fonts = true
 
 [[presets]]

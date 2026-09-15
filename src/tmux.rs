@@ -43,10 +43,28 @@ pub struct Session {
     pub repo: Option<String>,
     pub worktree: Option<String>,
     pub label_meta: Option<String>,
+    pub name_meta: Option<String>,
     pub branch: Option<String>,
 }
 
 impl Session {
+    pub fn columns(&self, nerd_fonts: bool) -> [String; 4] {
+        match (&self.name_meta, &self.worktree) {
+            (Some(name), Some(path)) => [
+                String::new(),
+                name.clone(),
+                path.clone(),
+                crate::branch_label(self.branch.as_deref(), nerd_fonts),
+            ],
+            _ => [
+                String::new(),
+                self.label(nerd_fonts),
+                String::new(),
+                String::new(),
+            ],
+        }
+    }
+
     pub fn label(&self, nerd_fonts: bool) -> String {
         let base = self.label_meta.clone().unwrap_or_else(|| self.name.clone());
         match &self.branch {
@@ -145,6 +163,7 @@ impl Tmux {
                     repo: option("@grove_repo")?,
                     worktree: option("@grove_worktree")?,
                     label_meta: option("@grove_label")?,
+                    name_meta: option("@grove_name")?,
                     branch: option("@grove_branch")?,
                 })
             })
@@ -224,6 +243,7 @@ impl Tmux {
                 ("@grove_repo", Some(checkout.repo.clone())),
                 ("@grove_worktree", Some(cwd.clone())),
                 ("@grove_label", Some(checkout.base_label())),
+                ("@grove_name", Some(checkout.display_name())),
                 ("@grove_branch", branch),
             ] {
                 let Some(value) = value else { continue };
@@ -403,6 +423,16 @@ mod tests {
         assert_eq!(sessions[0].label(true), checkout.label(true));
         assert_eq!(sessions[0].label(false), checkout.label(false));
         assert_eq!(sessions[0].branch.as_deref(), Some("main"));
+        assert_eq!(
+            sessions[0].name_meta.as_deref(),
+            Some(checkout.display_name().as_str())
+        );
+        for nerd_fonts in [true, false] {
+            assert_eq!(
+                sessions[0].columns(nerd_fonts),
+                checkout.columns(nerd_fonts)
+            );
+        }
         let windows = server
             .tmux
             .refs(&[
@@ -442,6 +472,7 @@ mod tests {
             repo: None,
             worktree: None,
             label_meta: Some("base".into()),
+            name_meta: None,
             branch: Some("feature".into()),
         };
         assert_eq!(session.label(true), "base   feature");
@@ -449,6 +480,26 @@ mod tests {
         session.label_meta = Some("old   frozen".into());
         session.branch = None;
         assert_eq!(session.label(false), "old   frozen");
+        assert_eq!(session.columns(false), ["", "old   frozen", "", ""]);
+        session.name_meta = Some("friendly/worktree".into());
+        session.worktree = Some("/path with spaces/界".into());
+        session.branch = Some("feature".into());
+        for nerd_fonts in [true, false] {
+            assert_eq!(
+                session.columns(nerd_fonts),
+                [
+                    String::new(),
+                    "friendly/worktree".into(),
+                    "/path with spaces/界".into(),
+                    crate::branch_label(Some("feature"), nerd_fonts),
+                ]
+            );
+        }
+        session.branch = None;
+        assert_eq!(session.columns(false)[3], "");
+        session.name_meta = None;
+        session.label_meta = None;
+        assert_eq!(session.columns(false), ["", "name", "", ""]);
     }
 
     #[test]
@@ -466,6 +517,8 @@ mod tests {
         assert_eq!(sessions[0].repo, None);
         assert_eq!(sessions[0].worktree, None);
         assert_eq!(sessions[0].label_meta, None);
+        assert_eq!(sessions[0].name_meta, None);
+        assert_eq!(sessions[0].columns(true), ["", "foreign", "", ""]);
         assert_eq!(sessions[0].branch, None);
     }
 

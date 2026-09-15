@@ -8,10 +8,86 @@ use git::{Checkout, Repository, discover};
 use std::{
     collections::HashSet,
     io::Write,
-    path::Path,
+    path::{Path, PathBuf},
     process::{Command, Stdio},
 };
 use tmux::{Session, Tmux};
+use unicode_width::UnicodeWidthStr;
+
+fn branch_label(branch: Option<&str>, nerd_fonts: bool) -> String {
+    branch.map_or_else(String::new, |branch| {
+        format!("{} {branch}", if nerd_fonts { "" } else { "branch:" })
+    })
+}
+
+fn home_paths(home: Option<&Path>) -> Vec<PathBuf> {
+    let Some(home) = home.filter(|path| path.is_absolute()) else {
+        return Vec::new();
+    };
+    let mut paths = vec![home.to_path_buf()];
+    if let Ok(canonical) = home.canonicalize()
+        && canonical != home
+    {
+        paths.push(canonical);
+    }
+    paths
+}
+
+fn aligned_choices(rows: impl Iterator<Item = [String; 4]>) -> Vec<(String, String)> {
+    let home = std::env::var_os("HOME").map(PathBuf::from);
+    aligned_choices_with_home(rows, &home_paths(home.as_deref()))
+}
+
+fn aligned_choices_with_home(
+    rows: impl Iterator<Item = [String; 4]>,
+    homes: &[PathBuf],
+) -> Vec<(String, String)> {
+    let rows: Vec<_> = rows
+        .map(|mut row| {
+            if let Some(relative) = homes
+                .iter()
+                .find_map(|home| Path::new(&row[2]).strip_prefix(home).ok())
+            {
+                row[2] = if relative.as_os_str().is_empty() {
+                    "~".into()
+                } else {
+                    format!("~/{}", relative.display())
+                };
+            }
+            row.map(|field| {
+                field.chars().fold(String::new(), |mut text, c| {
+                    if c.is_control() {
+                        text.extend(c.escape_default());
+                    } else {
+                        text.push(c);
+                    }
+                    text
+                })
+            })
+        })
+        .collect();
+    // Keep a blank marker slot even when every entry is a checkout or session.
+    let mut widths = [1, 0, 0, 0];
+    for row in &rows {
+        for (i, field) in row.iter().enumerate() {
+            widths[i] = widths[i].max(field.width());
+        }
+    }
+    rows.into_iter()
+        .enumerate()
+        .map(|(id, row)| {
+            let last = row.iter().rposition(|field| !field.is_empty()).unwrap_or(0);
+            let mut label = String::new();
+            for (i, field) in row.iter().enumerate().take(last + 1) {
+                label.push_str(field);
+                if i < last {
+                    label.push_str(&" ".repeat(widths[i] - field.width() + 2));
+                }
+            }
+            (id.to_string(), label)
+        })
+        .collect()
+}
 
 pub fn choose(items: &[(String, String)], prompt: &str) -> Result<Option<String>> {
     choose_with(std::ffi::OsStr::new("fzf"), items, prompt)
@@ -159,11 +235,11 @@ pub fn open(config: &Config, tmux: &Tmux) -> Result<()> {
             config::config_path().display()
         );
     }
-    let choices: Vec<_> = repositories
-        .iter()
-        .enumerate()
-        .map(|(i, entry)| (i.to_string(), entry.label(config.nerd_fonts)))
-        .collect();
+    let choices = aligned_choices(
+        repositories
+            .iter()
+            .map(|entry| entry.columns(config.nerd_fonts)),
+    );
     let Some(id) = choose(&choices, "repository> ")? else {
         return Ok(());
     };
@@ -179,11 +255,11 @@ pub fn open(config: &Config, tmux: &Tmux) -> Result<()> {
                 eprintln!("no active worktrees in {}", bare.path.display());
                 return Ok(());
             }
-            let choices: Vec<_> = checkouts
-                .iter()
-                .enumerate()
-                .map(|(i, checkout)| (i.to_string(), checkout.label(config.nerd_fonts)))
-                .collect();
+            let choices = aligned_choices(
+                checkouts
+                    .iter()
+                    .map(|checkout| checkout.columns(config.nerd_fonts)),
+            );
             let Some(id) = choose(&choices, "worktree> ")? else {
                 return Ok(());
             };
@@ -213,11 +289,7 @@ pub fn switch(tmux: &Tmux) -> Result<()> {
     if sessions.is_empty() {
         bail!("no matching tmux sessions")
     };
-    let choices: Vec<_> = sessions
-        .iter()
-        .enumerate()
-        .map(|(i, s)| (i.to_string(), s.label(nerd_fonts)))
-        .collect();
+    let choices = aligned_choices(sessions.iter().map(|session| session.columns(nerd_fonts)));
     if let Some(id) = choose(&choices, "session> ")? {
         let session = sessions
             .get(id.parse::<usize>()?)
@@ -243,6 +315,268 @@ mod tests {
         permissions.set_mode(0o755);
         fs::set_permissions(file.path(), permissions).unwrap();
         file.into_temp_path()
+    }
+
+    #[test]
+    fn bare_markers_align_separately_from_unicode_names_paths_and_branches() {
+        let checkout = Checkout {
+            repo: "/home/ann/repo/.git".into(),
+            worktree: "/home/ann/e\u{301}".into(),
+            repo_name: "e\u{301}".into(),
+            branch: Some("main".into()),
+            linked: false,
+        };
+        let repositories = [
+            Repository::Bare(git::BareRepository {
+                common: "/home/ann/界.git".into(),
+                path: "/home/ann/界.git".into(),
+            }),
+            Repository::Checkout(checkout.clone()),
+            Repository::Checkout(Checkout {
+                worktree: "/home/ann/短".into(),
+                linked: true,
+                ..checkout.clone()
+            }),
+            Repository::Checkout(Checkout {
+                worktree: "/home/ann/long".into(),
+                linked: true,
+                ..checkout
+            }),
+        ];
+        for nerd_fonts in [true, false] {
+            let rows: Vec<_> = repositories
+                .iter()
+                .map(|repo| repo.columns(nerd_fonts))
+                .collect();
+            let marker = if nerd_fonts { "\u{f418}" } else { "[bare]" };
+            assert_eq!(rows[0][0], marker);
+            assert!(rows[1..].iter().all(|row| row[0].is_empty()));
+            let choices =
+                aligned_choices_with_home(rows.clone().into_iter(), &["/home/ann".into()]);
+            let name_column = marker.width() + 2;
+            let path_column =
+                name_column + rows.iter().map(|row| row[1].width()).max().unwrap() + 2;
+            for (i, (id, label)) in choices.iter().enumerate() {
+                assert_eq!(id, &i.to_string());
+                assert_eq!(
+                    label[..label.find(&rows[i][1]).unwrap()].width(),
+                    name_column
+                );
+                assert_eq!(label[..label.find("~/").unwrap()].width(), path_column);
+                assert!(!label.ends_with(' '));
+                if i > 0 {
+                    assert!(label.starts_with(&" ".repeat(name_column)));
+                    assert!(!label.contains(marker));
+                }
+            }
+            assert_eq!(choices[0].1, format!("{marker}  界      ~/界.git"));
+            let branch = if nerd_fonts { "" } else { "branch:" };
+            assert_eq!(
+                choices[2].1[..choices[2].1.find(branch).unwrap()].width(),
+                choices[3].1[..choices[3].1.find(branch).unwrap()].width()
+            );
+        }
+    }
+
+    #[test]
+    fn normal_only_repository_picker_reserves_a_blank_marker_slot() {
+        let repository = Repository::Checkout(Checkout {
+            repo: "/repo/.git".into(),
+            worktree: "/repo".into(),
+            repo_name: "界".into(),
+            branch: Some("main".into()),
+            linked: false,
+        });
+        for nerd_fonts in [true, false] {
+            let columns = repository.columns(nerd_fonts);
+            assert_eq!(columns, ["", "界", "/repo", ""]);
+            assert_eq!(
+                aligned_choices_with_home(std::iter::once(columns), &[]),
+                [("0".into(), "   界  /repo".into())]
+            );
+        }
+    }
+
+    #[test]
+    fn home_paths_shorten_only_component_descendants() {
+        let homes = [PathBuf::from("/home/ann")];
+        for (path, expected) in [
+            ("/home/ann", "~"),
+            ("/home/ann/repo", "~/repo"),
+            ("/home/ann/space 界\n", "~/space 界\\n"),
+            ("/home/anna/repo", "/home/anna/repo"),
+            ("/home/ann-other", "/home/ann-other"),
+            ("/outside/repo", "/outside/repo"),
+            ("", ""),
+        ] {
+            let rows = [[String::new(), String::new(), path.into(), String::new()]];
+            let label = aligned_choices_with_home(rows.into_iter(), &homes)
+                .remove(0)
+                .1;
+            assert_eq!(label.trim_start(), expected);
+        }
+        for home in [None, Some(Path::new("")), Some(Path::new("relative"))] {
+            let homes = home_paths(home);
+            assert!(homes.is_empty());
+            let rows = [[
+                String::new(),
+                "repo".into(),
+                "/home/ann/repo".into(),
+                String::new(),
+            ]];
+            assert_eq!(
+                aligned_choices_with_home(rows.into_iter(), &homes)[0].1,
+                "   repo  /home/ann/repo"
+            );
+        }
+    }
+
+    #[test]
+    fn symlinked_home_matches_both_lexical_and_canonical_paths() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let target = dir.path().join("real home");
+        let alias = dir.path().join("home link");
+        fs::create_dir(&target).unwrap();
+        std::os::unix::fs::symlink(&target, &alias).unwrap();
+        let homes = home_paths(Some(&alias));
+        for home in [&alias, &target.canonicalize().unwrap()] {
+            let rows = [[
+                String::new(),
+                "repo".into(),
+                home.join("界 repo").to_string_lossy().into_owned(),
+                String::new(),
+            ]];
+            assert_eq!(
+                aligned_choices_with_home(rows.into_iter(), &homes)[0].1,
+                "   repo  ~/界 repo"
+            );
+        }
+    }
+
+    #[test]
+    fn shortened_paths_are_measured_after_escaping_by_terminal_width() {
+        let rows = [
+            [
+                String::new(),
+                "界".into(),
+                "/long/home/短".into(),
+                "branch: one".into(),
+            ],
+            [
+                String::new(),
+                "e\u{301}".into(),
+                "/long/home/e\u{301}\t".into(),
+                "branch: two".into(),
+            ],
+        ];
+        let choices = aligned_choices_with_home(rows.into_iter(), &["/long/home".into()]);
+        assert_eq!(choices[0], ("0".into(), "   界  ~/短   branch: one".into()));
+        assert_eq!(
+            choices[1],
+            (
+                "1".into(),
+                "   e\u{301}   ~/e\u{301}\\t  branch: two".into()
+            )
+        );
+        for (_, label) in choices {
+            assert_eq!(label[..label.find('~').unwrap()].width(), 7);
+            assert_eq!(label[..label.find("branch:").unwrap()].width(), 14);
+        }
+    }
+
+    #[test]
+    fn session_shortening_preserves_names_branches_legacy_labels_and_identity() {
+        let mut session = Session {
+            id: "$7".into(),
+            name: "actual name".into(),
+            repo: Some("/home/ann/repo/.git".into()),
+            worktree: Some("/home/ann/repo".into()),
+            label_meta: Some("legacy  /home/ann/repo".into()),
+            name_meta: Some("/home/ann/name".into()),
+            branch: Some("/home/ann/branch".into()),
+        };
+        let homes = ["/home/ann".into()];
+        let choices = aligned_choices_with_home(std::iter::once(session.columns(false)), &homes);
+        assert_eq!(
+            choices[0],
+            (
+                "0".into(),
+                "   /home/ann/name  ~/repo  branch: /home/ann/branch".into()
+            )
+        );
+        assert_eq!(session.id, "$7");
+        assert_eq!(session.name, "actual name");
+        assert_eq!(session.repo.as_deref(), Some("/home/ann/repo/.git"));
+        assert_eq!(session.worktree.as_deref(), Some("/home/ann/repo"));
+        session.name_meta = None;
+        session.branch = None;
+        let choices = aligned_choices_with_home(std::iter::once(session.columns(false)), &homes);
+        assert_eq!(choices[0].1, "   legacy  /home/ann/repo");
+        session.label_meta = None;
+        session.name = "/home/ann/foreign".into();
+        let choices = aligned_choices_with_home(std::iter::once(session.columns(false)), &homes);
+        assert_eq!(choices[0].1, "   /home/ann/foreign");
+    }
+
+    #[test]
+    fn columns_align_by_terminal_width_without_trailing_padding() {
+        let rows = [
+            [
+                String::new(),
+                "界".into(),
+                "/短".into(),
+                "branch: one".into(),
+            ],
+            [
+                String::new(),
+                "e\u{301}".into(),
+                "/long".into(),
+                "branch: two".into(),
+            ],
+            [String::new(), "main".into(), "/m".into(), String::new()],
+            [
+                String::new(),
+                "old label".into(),
+                String::new(),
+                String::new(),
+            ],
+        ];
+        let choices = aligned_choices_with_home(rows.into_iter(), &[]);
+        assert_eq!(
+            choices[0],
+            ("0".into(), "   界         /短    branch: one".into())
+        );
+        assert_eq!(
+            choices[1],
+            ("1".into(), "   e\u{301}          /long  branch: two".into())
+        );
+        assert_eq!(choices[2].1, "   main       /m");
+        assert_eq!(choices[3].1, "   old label");
+        for (_, label) in &choices[..2] {
+            assert_eq!(label[..label.find('/').unwrap()].width(), 14);
+            assert_eq!(label[..label.find("branch:").unwrap()].width(), 21);
+        }
+        assert!(aligned_choices_with_home(std::iter::empty(), &[]).is_empty());
+    }
+
+    #[test]
+    fn displayed_controls_are_escaped_without_changing_picker_ids_or_nul_transport() {
+        let rows = [[
+            String::new(),
+            "a\tb".into(),
+            "/p\n\r\0\u{1b}".into(),
+            String::new(),
+        ]];
+        let choices = aligned_choices_with_home(rows.clone().into_iter(), &[]);
+        assert_eq!(choices[0].1, r"   a\tb  /p\n\r\u{0}\u{1b}");
+        assert_eq!(rows[0][2], "/p\n\r\0\u{1b}");
+        let fake = script(
+            "[ \"$1\" = --read0 ] && [ \"$2\" = --print0 ] && [ \"$3\" = --delimiter ] && [ \"$5\" = --with-nth ] && [ \"$6\" = 2.. ] || exit 2; cat",
+        );
+        assert_eq!(
+            choose_with(fake.as_os_str(), &choices, "test").unwrap(),
+            Some("0".into())
+        );
     }
 
     #[test]
@@ -330,6 +664,7 @@ mod tests {
                 repo: Some("repo-a".into()),
                 worktree: Some("/tmp/a".into()),
                 label_meta: None,
+                name_meta: None,
                 branch: None,
             },
             Session {
@@ -338,6 +673,7 @@ mod tests {
                 repo: Some("repo-b".into()),
                 worktree: Some("/tmp/b".into()),
                 label_meta: None,
+                name_meta: None,
                 branch: None,
             },
             Session {
@@ -346,6 +682,7 @@ mod tests {
                 repo: None,
                 worktree: None,
                 label_meta: None,
+                name_meta: None,
                 branch: None,
             },
         ];
