@@ -306,12 +306,12 @@ mod tests {
     };
 
     fn script(body: &str) -> tempfile::TempPath {
-        let file = tempfile::NamedTempFile::new().unwrap();
-        fs::write(file.path(), format!("#!/bin/sh\n{body}\n")).unwrap();
-        let mut permissions = fs::metadata(file.path()).unwrap().permissions();
+        let path = tempfile::NamedTempFile::new().unwrap().into_temp_path();
+        fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
+        let mut permissions = fs::metadata(&path).unwrap().permissions();
         permissions.set_mode(0o755);
-        fs::set_permissions(file.path(), permissions).unwrap();
-        file.into_temp_path()
+        fs::set_permissions(&path, permissions).unwrap();
+        path
     }
 
     #[test]
