@@ -131,13 +131,12 @@ impl Tmux {
         self.run(&args.iter().map(|arg| (*arg).to_owned()).collect::<Vec<_>>())
     }
 
-    fn value(&self, target: &str, format: &str) -> Result<String> {
-        let output = self.refs(&["display-message", "-p", "-t", target, format])?;
-        Ok(output.strip_suffix('\n').unwrap_or(&output).to_owned())
-    }
-
     pub fn sessions(&self) -> Result<Vec<Session>> {
-        let output = match self.refs(&["list-sessions", "-F", "#{session_id}"]) {
+        let output = match self.refs(&[
+            "list-sessions",
+            "-F",
+            "#{session_id}:#{session_name}:#{@grove_repo}:#{@grove_worktree}:#{@grove_label}:#{@grove_name}:#{@grove_branch}",
+        ]) {
             Ok(output) => output,
             Err(error)
                 if error.to_string().contains("no server running on")
@@ -151,20 +150,20 @@ impl Tmux {
         };
         output
             .lines()
-            .map(|id| {
-                let option = |key: &str| -> Result<Option<String>> {
-                    let value = self.refs(&["show-option", "-qv", "-t", id, key])?;
-                    let value = value.trim_end();
-                    Ok((!value.is_empty()).then(|| unhex(value)).flatten())
-                };
+            .map(|line| {
+                let mut fields = line.splitn(7, ':');
+                let mut field = || fields.next().context("tmux returned invalid session data");
+                let id = field()?.to_owned();
+                let name = field()?.to_owned();
+                let option = |value: &str| (!value.is_empty()).then(|| unhex(value)).flatten();
                 Ok(Session {
-                    id: id.to_owned(),
-                    name: self.value(id, "#{session_name}")?,
-                    repo: option("@grove_repo")?,
-                    worktree: option("@grove_worktree")?,
-                    label_meta: option("@grove_label")?,
-                    name_meta: option("@grove_name")?,
-                    branch: option("@grove_branch")?,
+                    id,
+                    name,
+                    repo: option(field()?),
+                    worktree: option(field()?),
+                    label_meta: option(field()?),
+                    name_meta: option(field()?),
+                    branch: option(field()?),
                 })
             })
             .collect()

@@ -149,6 +149,81 @@ fn root_candidate(path: &Path) -> Option<PathBuf> {
         .then(|| canonical(path).ok())
         .flatten()
 }
+
+fn git_file(path: &Path) -> Option<PathBuf> {
+    let contents = std::fs::read_to_string(path).ok()?;
+    let target = contents.lines().next()?.strip_prefix("gitdir: ")?;
+    canonical(&path.parent()?.join(target)).ok()
+}
+
+fn common_dir(git_dir: &Path) -> PathBuf {
+    std::fs::read_to_string(git_dir.join("commondir"))
+        .ok()
+        .and_then(|path| canonical(&git_dir.join(path.trim_end())).ok())
+        .unwrap_or_else(|| git_dir.to_owned())
+}
+
+fn branch(git_dir: &Path) -> Option<String> {
+    std::fs::read_to_string(git_dir.join("HEAD"))
+        .ok()?
+        .strip_prefix("ref: refs/heads/")
+        .map(|branch| branch.trim_end().to_owned())
+}
+
+fn is_bare(git_dir: &Path) -> bool {
+    let Ok(config) = std::fs::read_to_string(git_dir.join("config")) else {
+        return true;
+    };
+    let mut core = false;
+    for line in config.lines().map(str::trim) {
+        if line.starts_with('[') {
+            core = line.eq_ignore_ascii_case("[core]");
+        } else if core
+            && let Some((key, value)) = line.split_once('=')
+            && key.trim().eq_ignore_ascii_case("bare")
+        {
+            return value.trim().eq_ignore_ascii_case("true");
+        }
+    }
+    true
+}
+
+fn inspect(anchor: PathBuf) -> Option<Repository> {
+    let dot_git = anchor.join(".git");
+    if dot_git.is_file() {
+        let git_dir = git_file(&dot_git)?;
+        if bare_marker(&git_dir) && is_bare(&git_dir) {
+            return Some(Repository::Bare(BareRepository {
+                common: git_dir,
+                path: anchor,
+            }));
+        }
+        let common = common_dir(&git_dir);
+        return Some(Repository::Checkout(Checkout {
+            repo: common.to_string_lossy().into_owned(),
+            repo_name: display_name(&common),
+            worktree: anchor,
+            branch: branch(&git_dir),
+            linked: git_dir != common,
+        }));
+    }
+    if dot_git.is_dir() {
+        let git_dir = canonical(&dot_git).ok()?;
+        return Some(Repository::Checkout(Checkout {
+            repo: git_dir.to_string_lossy().into_owned(),
+            repo_name: display_name(&git_dir),
+            worktree: anchor,
+            branch: branch(&git_dir),
+            linked: false,
+        }));
+    }
+    (bare_marker(&anchor) && is_bare(&anchor)).then(|| {
+        Repository::Bare(BareRepository {
+            common: anchor.clone(),
+            path: anchor,
+        })
+    })
+}
 fn descend(entry: &DirEntry) -> bool {
     if entry.depth() == 0 || entry.file_name() != ".git" {
         return !matches!(
@@ -278,18 +353,7 @@ fn listed_worktrees(listing: &str) -> Vec<Listed> {
 }
 
 pub fn discover(roots: &[PathBuf], max_depth: usize) -> Result<Vec<Repository>> {
-    let version = git_command()
-        .arg("--version")
-        .output()
-        .context("start git (install Git and put it on PATH)")?;
-    if !version.status.success() {
-        bail!(
-            "git --version failed: {}",
-            String::from_utf8_lossy(&version.stderr).trim_end()
-        );
-    }
     let mut found = BTreeMap::new();
-    let mut cache = HashMap::new();
     for root in roots {
         if root.exists() {
             let mut walker = WalkDir::new(root)
@@ -311,40 +375,27 @@ pub fn discover(roots: &[PathBuf], max_depth: usize) -> Result<Vec<Repository>> 
                 let Some(anchor) = root_candidate(entry.path()) else {
                     continue;
                 };
-                let Some(info) = probe(&anchor, &mut cache) else {
+                let Some(repository) = inspect(anchor) else {
                     continue;
                 };
-                if info.bare {
-                    walker.skip_current_dir();
-                    // Pointer containers and their explicitly configured .bare roots share identity.
-                    let key = (true, info.common.clone());
-                    let bare = BareRepository {
-                        common: info.common,
-                        path: anchor,
-                    };
-                    let existing = found
-                        .entry(key)
-                        .or_insert_with(|| Repository::Bare(bare.clone()));
-                    if let Repository::Bare(previous) = existing
-                        && bare.path < previous.path
-                    {
-                        *previous = bare;
+                walker.skip_current_dir();
+                match repository {
+                    Repository::Bare(bare) => {
+                        // Pointer containers and their explicitly configured .bare roots share identity.
+                        let existing = found
+                            .entry((true, bare.common.clone()))
+                            .or_insert_with(|| Repository::Bare(bare.clone()));
+                        if let Repository::Bare(previous) = existing
+                            && bare.path < previous.path
+                        {
+                            *previous = bare;
+                        }
                     }
-                } else if candidate_matches(&anchor, &info) {
-                    walker.skip_current_dir();
-                    let worktree = info.top.expect("matched checkout has a top level");
-                    found.entry((false, worktree.clone())).or_insert_with(|| {
-                        let branch = git(&worktree, &["symbolic-ref", "--short", "-q", "HEAD"])
-                            .ok()
-                            .filter(|branch| !branch.is_empty());
-                        Repository::Checkout(Checkout {
-                            repo: info.common.to_string_lossy().into_owned(),
-                            repo_name: display_name(&info.common),
-                            worktree,
-                            branch,
-                            linked: info.git_dir != info.common,
-                        })
-                    });
+                    Repository::Checkout(checkout) => {
+                        found
+                            .entry((false, checkout.worktree.clone()))
+                            .or_insert(Repository::Checkout(checkout));
+                    }
                 }
             }
         }
@@ -496,7 +547,7 @@ mod tests {
         let all = discover_checkouts(&[root], 3).unwrap();
         assert_eq!(all.len(), 1);
         assert_eq!(all[0].worktree, repo.canonicalize().unwrap());
-        assert_eq!(counts(), (5, 0));
+        assert_eq!(counts(), (0, 0));
     }
     #[test]
     fn checkout_contents_are_pruned_but_explicit_nested_roots_are_scanned() {
@@ -515,7 +566,7 @@ mod tests {
             let all = discover_checkouts(&[root.to_path_buf()], 10).unwrap();
             assert_eq!(all.len(), 1);
             assert_eq!(all[0].worktree, repo.canonicalize().unwrap());
-            assert_eq!(GIT_INVOCATIONS.with(std::cell::Cell::get), 5);
+            assert_eq!(GIT_INVOCATIONS.with(std::cell::Cell::get), 0);
         }
         let children = repo.join("children");
         for roots in [
@@ -598,8 +649,8 @@ mod tests {
             reset_counts();
             let all = discover(&[hub.clone(), bare.clone(), unselected], 10).unwrap();
             assert_eq!(all.len(), 2);
-            // Pointer and .bare are distinct probes; direct bare roots share the cache.
-            assert_eq!(counts(), (if pointer { 13 } else { 9 }, 0));
+            // Initial discovery reads repository metadata directly.
+            assert_eq!(counts(), (0, 0));
             let Repository::Bare(selected) = &all[0] else {
                 panic!("bare entry")
             };
@@ -625,10 +676,7 @@ mod tests {
             );
             let shallow = discover(std::slice::from_ref(&hub), 1).unwrap();
             assert_eq!(shallow, vec![all[0].clone()]);
-            eprintln!(
-                "bare pointer={pointer}: initial {} Git / 0 lists; selected 10 Git / 1 list",
-                if pointer { 13 } else { 9 }
-            );
+            eprintln!("bare pointer={pointer}: initial 0 Git / 0 lists; selected 10 Git / 1 list");
         }
     }
 
@@ -909,7 +957,7 @@ mod tests {
         reset_counts();
         let entries = discover(&[bare.clone(), bare.clone()], 10).unwrap();
         assert_eq!(entries.len(), 1);
-        assert_eq!(counts(), (5, 0));
+        assert_eq!(counts(), (0, 0));
         let Repository::Bare(selected) = &entries[0] else {
             panic!("bare entry")
         };
@@ -925,7 +973,7 @@ mod tests {
     }
 
     #[test]
-    fn discovery_process_counts_are_linear_and_measured() {
+    fn initial_discovery_starts_no_git_processes() {
         let d = TempDir::new().unwrap();
         let root = d.path().join("root");
         let repo = root.join("repo");
@@ -952,15 +1000,15 @@ mod tests {
         let one = discover_checkouts(std::slice::from_ref(&ordinary), 1).unwrap();
         let ordinary_count = GIT_INVOCATIONS.with(std::cell::Cell::get);
         assert_eq!(one.len(), 1);
-        assert_eq!(ordinary_count, 5); // version + three-part probe + branch
+        assert_eq!(ordinary_count, 0);
         assert_eq!(counts().1, 0);
 
-        for (scan_root, expected_checkouts, expected_calls) in [(&repo, 1, 5), (&root, 9, 37)] {
+        for (scan_root, expected_checkouts) in [(&repo, 1), (&root, 9)] {
             reset_counts();
             let shared = discover_checkouts(std::slice::from_ref(scan_root), 1).unwrap();
             let shared_count = GIT_INVOCATIONS.with(std::cell::Cell::get);
             assert_eq!(shared.len(), expected_checkouts);
-            assert_eq!(shared_count, expected_calls); // version + probe and branch per checkout
+            assert_eq!(shared_count, 0);
             assert_eq!(counts().1, 0);
             eprintln!(
                 "normal discovery: {} checkouts, {shared_count} Git / 0 lists",

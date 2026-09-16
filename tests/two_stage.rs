@@ -110,13 +110,7 @@ shift 2
 printf '%s\0' "$@" >> "$TEST_DIR/tmux.log"
 printf '\n' >> "$TEST_DIR/tmux.log"
 case "$1" in
-    list-sessions) [ -z "$REUSE_WORKTREE" ] || printf '$7\n';;
-    display-message) printf 'old manually named session\n';;
-    show-option)
-        case "$5" in
-            @grove_worktree) printf '%s\n' "$REUSE_WORKTREE";;
-            @grove_repo) printf '7265706f\n';;
-        esac;;
+    list-sessions) [ -z "$REUSE_WORKTREE" ] || printf '$7:old manually named session:7265706f:%s:::\n' "$REUSE_WORKTREE";;
     new-session) printf '$8\t@1\n';;
     rename-window|set-option|attach-session|switch-client) :;;
     *) exit 91;;
