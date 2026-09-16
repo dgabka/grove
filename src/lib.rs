@@ -124,7 +124,7 @@ fn choose_with(
     let mut stdin = child.stdin.take().expect("piped stdin");
     let writer = std::thread::spawn(move || stdin.write_all(input.as_bytes()));
     let output = child.wait_with_output().context("wait for fzf")?;
-    let write_error = writer.join().expect("fzf input writer panicked").err();
+    let _write_result = writer.join().expect("fzf input writer panicked");
     if matches!(output.status.code(), Some(1 | 130)) {
         return Ok(None);
     }
@@ -133,9 +133,6 @@ fn choose_with(
             "fzf failed: {}",
             String::from_utf8_lossy(&output.stderr).trim_end()
         );
-    }
-    if let Some(error) = write_error {
-        return Err(error).context("write choices to fzf");
     }
     let chosen = std::str::from_utf8(&output.stdout).context("fzf returned non-UTF-8 output")?;
     let Some(record) = chosen.strip_suffix('\0') else {
@@ -628,8 +625,11 @@ mod tests {
     #[test]
     fn picker_preserves_machine_id_and_rejects_bad_output() {
         let good = script("printf '7\\tlabel with\\nnewline\\0'");
+        let items = (0..2_000)
+            .map(|i| (i.to_string(), "x".repeat(100)))
+            .collect::<Vec<_>>();
         assert_eq!(
-            choose_with(good.as_os_str(), &[("7".into(), "ignored".into())], "test")
+            choose_with(good.as_os_str(), &items, "test")
                 .unwrap()
                 .as_deref(),
             Some("7")
