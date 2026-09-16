@@ -284,7 +284,12 @@ pub fn open(config: &Config, tmux: &Tmux) -> Result<()> {
 
 pub fn switch(tmux: &Tmux) -> Result<()> {
     let nerd_fonts = config::optional_nerd_fonts()?;
-    let sessions = tmux.sessions()?;
+    let current = tmux.current_session()?;
+    let sessions = tmux
+        .sessions()?
+        .into_iter()
+        .filter(|session| current.as_deref() != Some(&session.id))
+        .collect::<Vec<_>>();
     if sessions.is_empty() {
         bail!("no matching tmux sessions")
     };
@@ -493,6 +498,7 @@ mod tests {
             label_meta: Some("legacy  /home/ann/repo".into()),
             name_meta: Some("/home/ann/name".into()),
             branch: Some("/home/ann/branch".into()),
+            activity: 0,
         };
         let homes = ["/home/ann".into()];
         let choices = aligned_choices_with_home(std::iter::once(session.columns(false)), &homes);
@@ -668,6 +674,7 @@ mod tests {
                 label_meta: None,
                 name_meta: None,
                 branch: None,
+                activity: 0,
             },
             Session {
                 id: "$2".into(),
@@ -677,6 +684,7 @@ mod tests {
                 label_meta: None,
                 name_meta: None,
                 branch: None,
+                activity: 0,
             },
             Session {
                 id: "$3".into(),
@@ -686,6 +694,7 @@ mod tests {
                 label_meta: None,
                 name_meta: None,
                 branch: None,
+                activity: 0,
             },
         ];
         assert_eq!(

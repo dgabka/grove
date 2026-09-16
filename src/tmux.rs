@@ -3,7 +3,10 @@ use crate::{
     git::Checkout,
 };
 use anyhow::{Context, Result, bail};
-use std::process::{Command, Stdio};
+use std::{
+    cmp::Reverse,
+    process::{Command, Stdio},
+};
 
 fn hex(value: &str) -> String {
     value
@@ -45,6 +48,11 @@ pub struct Session {
     pub label_meta: Option<String>,
     pub name_meta: Option<String>,
     pub branch: Option<String>,
+    pub(crate) activity: u64,
+}
+
+fn recent_first(sessions: &mut [Session]) {
+    sessions.sort_by_key(|session| Reverse(session.activity));
 }
 
 impl Session {
@@ -135,7 +143,7 @@ impl Tmux {
         let output = match self.refs(&[
             "list-sessions",
             "-F",
-            "#{session_id}:#{session_name}:#{@grove_repo}:#{@grove_worktree}:#{@grove_label}:#{@grove_name}:#{@grove_branch}",
+            "#{session_id}:#{session_name}:#{@grove_repo}:#{@grove_worktree}:#{@grove_label}:#{@grove_name}:#{@grove_branch}:#{session_activity}",
         ]) {
             Ok(output) => output,
             Err(error)
@@ -148,10 +156,10 @@ impl Tmux {
             }
             Err(error) => return Err(error),
         };
-        output
+        let mut sessions = output
             .lines()
             .map(|line| {
-                let mut fields = line.splitn(7, ':');
+                let mut fields = line.splitn(8, ':');
                 let mut field = || fields.next().context("tmux returned invalid session data");
                 let id = field()?.to_owned();
                 let name = field()?.to_owned();
@@ -164,9 +172,29 @@ impl Tmux {
                     label_meta: option(field()?),
                     name_meta: option(field()?),
                     branch: option(field()?),
+                    activity: field()?
+                        .parse()
+                        .context("tmux returned invalid session activity")?,
                 })
             })
-            .collect()
+            .collect::<Result<Vec<_>>>()?;
+        recent_first(&mut sessions);
+        Ok(sessions)
+    }
+
+    pub fn current_session(&self) -> Result<Option<String>> {
+        let Some(pane) = std::env::var_os("TMUX_PANE") else {
+            return Ok(None);
+        };
+        let id = self.run(&[
+            "display-message".into(),
+            "-p".into(),
+            "-t".into(),
+            pane.into_string()
+                .map_err(|_| anyhow::anyhow!("TMUX_PANE is not valid Unicode"))?,
+            "#{session_id}".into(),
+        ])?;
+        Ok(Some(id.trim().to_owned()))
     }
 
     pub fn navigate(&self, id: &str) -> Result<()> {
@@ -473,6 +501,7 @@ mod tests {
             label_meta: Some("base".into()),
             name_meta: None,
             branch: Some("feature".into()),
+            activity: 0,
         };
         assert_eq!(session.label(true), "base   feature");
         assert_eq!(session.label(false), "base  branch: feature");
@@ -499,6 +528,34 @@ mod tests {
         session.name_meta = None;
         session.label_meta = None;
         assert_eq!(session.columns(false), ["", "name", "", ""]);
+    }
+
+    #[test]
+    fn sessions_are_most_recent_first() {
+        let mut sessions = [
+            Session {
+                id: "$1".into(),
+                name: "old".into(),
+                repo: None,
+                worktree: None,
+                label_meta: None,
+                name_meta: None,
+                branch: None,
+                activity: 1,
+            },
+            Session {
+                id: "$2".into(),
+                name: "new".into(),
+                repo: None,
+                worktree: None,
+                label_meta: None,
+                name_meta: None,
+                branch: None,
+                activity: 2,
+            },
+        ];
+        recent_first(&mut sessions);
+        assert_eq!(sessions.map(|session| session.name), ["new", "old"]);
     }
 
     #[test]

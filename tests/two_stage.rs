@@ -110,7 +110,7 @@ shift 2
 printf '%s\0' "$@" >> "$TEST_DIR/tmux.log"
 printf '\n' >> "$TEST_DIR/tmux.log"
 case "$1" in
-    list-sessions) [ -z "$REUSE_WORKTREE" ] || printf '$7:old manually named session:7265706f:%s:::\n' "$REUSE_WORKTREE";;
+    list-sessions) [ -z "$REUSE_WORKTREE" ] || printf '$7:old manually named session:7265706f:%s::::0\n' "$REUSE_WORKTREE";;
     new-session) printf '$8\t@1\n';;
     rename-window|set-option|attach-session|switch-client) :;;
     *) exit 91;;
@@ -194,6 +194,7 @@ esac
             .env("GIT_CONFIG_GLOBAL", "/dev/null")
             .env("GIT_CONFIG_NOSYSTEM", "1")
             .env_remove("TMUX")
+            .env_remove("TMUX_PANE")
             .env_remove("GIT_DIR")
             .env_remove("GIT_WORK_TREE")
             .env_remove("GIT_COMMON_DIR")
