@@ -38,8 +38,8 @@ Deterministic process-count regressions require zero Git calls during initial di
 ## tmux popup bindings
 
 ```tmux
-bind g display-popup -E -w 80% -h 80% 'grove'
-bind G display-popup -E -w 80% -h 80% 'grove switch'
+bind g display-popup -E -w 60% -h 80% 'grove'
+bind G display-popup -E -w 60% -h 80% 'grove switch'
 ```
 
 The popup command is a tmux configuration example; Grove itself invokes Git, tmux, and fzf with process argument arrays.

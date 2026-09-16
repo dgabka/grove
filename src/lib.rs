@@ -113,6 +113,8 @@ fn choose_with(
             "\t",
             "--with-nth",
             "2..",
+            "--height",
+            "100%",
             "--prompt",
             prompt,
         ])
