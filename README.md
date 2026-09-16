@@ -4,13 +4,19 @@
 
 ## Install
 
-Requires a current Rust toolchain, `git`, `tmux`, and `fzf` on `PATH`.
+Install with Nix (includes `git`, `tmux`, and `fzf`):
+
+```sh
+nix run github:dgabka/grove
+```
+
+Or install with a current Rust toolchain; this requires `git`, `tmux`, and `fzf` on `PATH`:
 
 ```sh
 cargo install --path .
 ```
 
-Copy [`example-config.toml`](example-config.toml) to `$XDG_CONFIG_HOME/grove/config.toml` (or `~/.config/grove/config.toml`). Roots must be absolute paths; `~` is not expanded. `max_depth` limits directory scanning; selecting a bare repository uses Git's registry to find its linked worktrees even outside those roots or below that depth.
+Nix flake consumers can use `grove.packages.${pkgs.system}.default` directly. Copy [`example-config.toml`](example-config.toml) to `$XDG_CONFIG_HOME/grove/config.toml` (or `~/.config/grove/config.toml`). Roots must be absolute paths; `~` is not expanded. `max_depth` limits directory scanning; selecting a bare repository uses Git's registry to find its linked worktrees even outside those roots or below that depth.
 
 A pane `command` is an argv array; Grove passes its elements to tmux as separate process arguments instead of constructing a shell command string. Omitting panes leaves a shell window. New sessions first offer the built-in one-shell layout plus configured presets.
 
