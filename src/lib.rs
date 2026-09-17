@@ -282,25 +282,38 @@ pub fn open(config: &Config, tmux: &Tmux) -> Result<()> {
     tmux.navigate(&id)
 }
 
-fn switch_sessions(
+fn selectable_sessions(
     sessions: Vec<Session>,
     current: Option<&str>,
-    repo: Option<&str>,
+    repo_only: bool,
 ) -> Vec<Session> {
+    let current_repo = repo_only
+        .then(|| {
+            sessions
+                .iter()
+                .find(|session| Some(session.id.as_str()) == current)
+        })
+        .flatten()
+        .and_then(|session| session.repo.as_deref())
+        .map(str::to_owned);
+    let restrict = current_repo.as_deref().is_some_and(|repo| {
+        sessions.iter().any(|session| {
+            Some(session.id.as_str()) != current && session.repo.as_deref() == Some(repo)
+        })
+    });
     sessions
         .into_iter()
         .filter(|session| {
-            current != Some(&session.id)
-                && repo.is_none_or(|repo| session.repo.as_deref() == Some(repo))
+            Some(session.id.as_str()) != current
+                && (!restrict || session.repo.as_deref() == current_repo.as_deref())
         })
         .collect()
 }
 
 pub fn switch(tmux: &Tmux, repo_only: bool) -> Result<()> {
     let nerd_fonts = config::optional_nerd_fonts()?;
-    let repo = repo_only.then(git::current_repo).transpose()?.flatten();
     let current = tmux.current_session()?;
-    let sessions = switch_sessions(tmux.sessions()?, current.as_deref(), repo.as_deref());
+    let sessions = selectable_sessions(tmux.sessions()?, current.as_deref(), repo_only);
     if sessions.is_empty() {
         bail!("no matching tmux sessions")
     };
@@ -675,7 +688,7 @@ mod tests {
     }
 
     #[test]
-    fn repository_switch_filters_only_exact_metadata_and_current_session() {
+    fn selectable_sessions_filters_current_metadata_with_fallback() {
         let session = |id: &str, repo: Option<&str>| Session {
             id: id.into(),
             name: id.into(),
@@ -692,19 +705,40 @@ mod tests {
             session("$other", Some("/other/.git")),
             session("$foreign", None),
         ];
+        for (current, repo_only, expected) in [
+            (Some("$current"), true, vec!["$match"]),
+            (
+                Some("$current"),
+                false,
+                vec!["$match", "$other", "$foreign"],
+            ),
+            (Some("$foreign"), true, vec!["$current", "$match", "$other"]),
+            (
+                Some("$missing"),
+                true,
+                vec!["$current", "$match", "$other", "$foreign"],
+            ),
+        ] {
+            assert_eq!(
+                selectable_sessions(sessions.clone(), current, repo_only)
+                    .iter()
+                    .map(|session| session.id.as_str())
+                    .collect::<Vec<_>>(),
+                expected
+            );
+        }
+
+        let no_match = vec![
+            session("$current", Some("/repo/.git")),
+            session("$other", Some("/other/.git")),
+            session("$foreign", None),
+        ];
         assert_eq!(
-            switch_sessions(sessions.clone(), Some("$current"), Some("/repo/.git"))
+            selectable_sessions(no_match, Some("$current"), true)
                 .iter()
                 .map(|session| session.id.as_str())
                 .collect::<Vec<_>>(),
-            ["$match"]
-        );
-        assert_eq!(
-            switch_sessions(sessions, Some("$current"), None)
-                .iter()
-                .map(|session| session.id.as_str())
-                .collect::<Vec<_>>(),
-            ["$match", "$other", "$foreign"]
+            ["$other", "$foreign"]
         );
     }
 
