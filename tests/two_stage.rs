@@ -323,6 +323,45 @@ fn close_switches_to_the_selected_stable_id_before_killing_current() {
 }
 
 #[test]
+fn close_switch_failure_does_not_kill_current() {
+    let fixture = Fixture::new();
+    let output = fixture.run_session(
+        &["close"],
+        &["0"],
+        "$current:current::::::2\n$target:target::::::1\n",
+        "$current",
+        "switch",
+        true,
+    );
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("tmux switch-client -t $target failed")
+    );
+    let log = fixture.text("tmux.log");
+    assert!(log.contains("switch-client\0-t\0$target\0"));
+    assert!(!log.contains("kill-session"), "{log}");
+}
+
+#[test]
+fn close_kill_failure_follows_successful_switch() {
+    let fixture = Fixture::new();
+    let output = fixture.run_session(
+        &["close"],
+        &["0"],
+        "$current:current::::::2\n$target:target::::::1\n",
+        "$current",
+        "kill",
+        true,
+    );
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("tmux kill-session -t $current"));
+    let log = fixture.text("tmux.log");
+    let switched = log.find("switch-client\0-t\0$target\0").unwrap();
+    let killed = log.find("kill-session\0-t\0$current\0").unwrap();
+    assert!(switched < killed, "{log}");
+}
+
+#[test]
 fn close_cancellation_and_no_alternatives_are_noops() {
     let fixture = Fixture::new();
     let output = fixture.run_session(
