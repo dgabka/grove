@@ -327,6 +327,26 @@ pub fn switch(tmux: &Tmux, repo_only: bool) -> Result<()> {
     Ok(())
 }
 
+pub fn close(tmux: &Tmux, repo_only: bool) -> Result<()> {
+    let current = tmux
+        .current_session()?
+        .context("grove close must be run inside tmux")?;
+    let nerd_fonts = config::optional_nerd_fonts()?;
+    let sessions = selectable_sessions(tmux.sessions()?, Some(&current), repo_only);
+    if sessions.is_empty() {
+        return Ok(());
+    }
+    let choices = aligned_choices(sessions.iter().map(|session| session.columns(nerd_fonts)));
+    let Some(id) = choose(&choices, "session> ")? else {
+        return Ok(());
+    };
+    let session = sessions
+        .get(id.parse::<usize>()?)
+        .context("fzf selected an unknown session")?;
+    tmux.navigate(&session.id)?;
+    tmux.kill_session(&current)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
