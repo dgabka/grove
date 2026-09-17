@@ -13,12 +13,17 @@ enum Command {
         #[arg(long)]
         repo: bool,
     },
+    Close {
+        #[arg(long)]
+        repo: bool,
+    },
 }
 fn main() -> Result<()> {
     let cli = Cli::parse();
     let tmux = grove::tmux::Tmux::from_env();
     match cli.command {
         Some(Command::Switch { repo }) => grove::switch(&tmux, repo),
+        Some(Command::Close { repo }) => grove::close(&tmux, repo),
         None => grove::open(&grove::config::load()?, &tmux),
     }
 }
@@ -28,7 +33,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn switch_accepts_optional_repo_flag() {
+    fn switch_and_close_accept_optional_repo_flag() {
         assert!(matches!(
             Cli::try_parse_from(["grove", "switch"]).unwrap().command,
             Some(Command::Switch { repo: false })
@@ -38,6 +43,16 @@ mod tests {
                 .unwrap()
                 .command,
             Some(Command::Switch { repo: true })
+        ));
+        assert!(matches!(
+            Cli::try_parse_from(["grove", "close"]).unwrap().command,
+            Some(Command::Close { repo: false })
+        ));
+        assert!(matches!(
+            Cli::try_parse_from(["grove", "close", "--repo"])
+                .unwrap()
+                .command,
+            Some(Command::Close { repo: true })
         ));
     }
 }
