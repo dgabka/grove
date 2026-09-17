@@ -110,9 +110,17 @@ shift 2
 printf '%s\0' "$@" >> "$TEST_DIR/tmux.log"
 printf '\n' >> "$TEST_DIR/tmux.log"
 case "$1" in
-    list-sessions) [ -z "$REUSE_WORKTREE" ] || printf '$7:old manually named session:7265706f:%s::::0\n' "$REUSE_WORKTREE";;
+    display-message) printf '%s\n' "${CURRENT_SESSION-}";;
+    list-sessions)
+        if [ -n "${TMUX_SESSIONS-}" ]; then
+            printf '%s' "$TMUX_SESSIONS"
+        elif [ -n "$REUSE_WORKTREE" ]; then
+            printf '$7:old manually named session:7265706f:%s::::0\n' "$REUSE_WORKTREE"
+        fi;;
     new-session) printf '$8\t@1\n';;
-    rename-window|set-option|attach-session|switch-client) :;;
+    rename-window|set-option|attach-session) :;;
+    switch-client) [ "${FAIL_TMUX-}" != switch ];;
+    kill-session) [ "${FAIL_TMUX-}" != kill ];;
     *) exit 91;;
 esac
 "#,
@@ -204,9 +212,84 @@ esac
         output
     }
 
+    fn run_session(
+        &self,
+        args: &[&str],
+        choices: &[&str],
+        sessions: &str,
+        current: &str,
+        fail_tmux: &str,
+    ) -> Output {
+        for entry in fs::read_dir(self.dir.path()).unwrap() {
+            let entry = entry.unwrap();
+            if entry.file_type().unwrap().is_file() {
+                fs::remove_file(entry.path()).unwrap();
+            }
+        }
+        for (i, choice) in choices.iter().enumerate() {
+            fs::write(self.dir.path().join(format!("choice-{}", i + 1)), choice).unwrap();
+        }
+        let output = Command::new(env!("CARGO_BIN_EXE_grove"))
+            .args(args)
+            .current_dir(self.dir.path())
+            .env(
+                "PATH",
+                format!(
+                    "{}:{}",
+                    self.dir.path().join("bin").display(),
+                    std::env::var("PATH").unwrap()
+                ),
+            )
+            .env("HOME", self.dir.path())
+            .env("XDG_CONFIG_HOME", self.dir.path().join("config"))
+            .env("TEST_DIR", self.dir.path())
+            .env("MUTATE_AT", "0")
+            .env("MUTATE_PATH", self.dir.path())
+            .env("MUTATION", "")
+            .env(
+                "GROVE_TMUX_SOCKET",
+                format!(
+                    "grove-fake-{}",
+                    self.dir.path().file_name().unwrap().to_string_lossy()
+                ),
+            )
+            .env("TMUX_SESSIONS", sessions)
+            .env("CURRENT_SESSION", current)
+            .env("FAIL_TMUX", fail_tmux)
+            .env("TMUX", "fake,0,0")
+            .env("TMUX_PANE", "%1")
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env_remove("REUSE_WORKTREE")
+            .env_remove("GIT_DIR")
+            .env_remove("GIT_WORK_TREE")
+            .env_remove("GIT_COMMON_DIR")
+            .output()
+            .unwrap();
+        assert_eq!(self.text("count"), choices.len().to_string());
+        output
+    }
+
     fn text(&self, name: &str) -> String {
         fs::read_to_string(self.dir.path().join(name)).unwrap_or_default()
     }
+}
+
+#[test]
+fn session_runner_uses_isolated_current_session_and_configurable_rows() {
+    let fixture = Fixture::new();
+    let output = fixture.run_session(
+        &["switch"],
+        &["0"],
+        "$current:current:7265706f:::::2\n$target:target:7265706f:::::1\n",
+        "$current",
+        "",
+    );
+    assert!(output.status.success(), "{output:?}");
+    let log = fixture.text("tmux.log");
+    assert!(log.contains("display-message\0-p\0-t\0%1\0#{session_id}\0"));
+    assert!(log.contains("list-sessions\0-F\0"));
+    assert!(log.contains("switch-client\0-t\0$target\0"));
 }
 
 #[test]
