@@ -9,13 +9,16 @@ struct Cli {
 }
 #[derive(Subcommand)]
 enum Command {
-    Switch,
+    Switch {
+        #[arg(long)]
+        repo: bool,
+    },
 }
 fn main() -> Result<()> {
     let cli = Cli::parse();
     let tmux = grove::tmux::Tmux::from_env();
     match cli.command {
-        Some(Command::Switch) => grove::switch(&tmux),
+        Some(Command::Switch { repo }) => grove::switch(&tmux, repo),
         None => grove::open(&grove::config::load()?, &tmux),
     }
 }
@@ -25,14 +28,16 @@ mod tests {
     use super::*;
 
     #[test]
-    fn switch_accepts_no_options_and_rejects_repo() {
+    fn switch_accepts_optional_repo_flag() {
         assert!(matches!(
             Cli::try_parse_from(["grove", "switch"]).unwrap().command,
-            Some(Command::Switch)
+            Some(Command::Switch { repo: false })
         ));
-        let error = Cli::try_parse_from(["grove", "switch", "--repo"])
-            .err()
-            .expect("--repo must be rejected");
-        assert_eq!(error.kind(), clap::error::ErrorKind::UnknownArgument);
+        assert!(matches!(
+            Cli::try_parse_from(["grove", "switch", "--repo"])
+                .unwrap()
+                .command,
+            Some(Command::Switch { repo: true })
+        ));
     }
 }

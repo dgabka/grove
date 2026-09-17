@@ -282,14 +282,25 @@ pub fn open(config: &Config, tmux: &Tmux) -> Result<()> {
     tmux.navigate(&id)
 }
 
-pub fn switch(tmux: &Tmux) -> Result<()> {
-    let nerd_fonts = config::optional_nerd_fonts()?;
-    let current = tmux.current_session()?;
-    let sessions = tmux
-        .sessions()?
+fn switch_sessions(
+    sessions: Vec<Session>,
+    current: Option<&str>,
+    repo: Option<&str>,
+) -> Vec<Session> {
+    sessions
         .into_iter()
-        .filter(|session| current.as_deref() != Some(&session.id))
-        .collect::<Vec<_>>();
+        .filter(|session| {
+            current != Some(&session.id)
+                && repo.is_none_or(|repo| session.repo.as_deref() == Some(repo))
+        })
+        .collect()
+}
+
+pub fn switch(tmux: &Tmux, repo_only: bool) -> Result<()> {
+    let nerd_fonts = config::optional_nerd_fonts()?;
+    let repo = repo_only.then(git::current_repo).transpose()?.flatten();
+    let current = tmux.current_session()?;
+    let sessions = switch_sessions(tmux.sessions()?, current.as_deref(), repo.as_deref());
     if sessions.is_empty() {
         bail!("no matching tmux sessions")
     };
@@ -660,6 +671,40 @@ mod tests {
                 .unwrap()
                 .as_deref(),
             Some("0")
+        );
+    }
+
+    #[test]
+    fn repository_switch_filters_only_exact_metadata_and_current_session() {
+        let session = |id: &str, repo: Option<&str>| Session {
+            id: id.into(),
+            name: id.into(),
+            repo: repo.map(str::to_owned),
+            worktree: None,
+            label_meta: None,
+            name_meta: None,
+            branch: None,
+            activity: 0,
+        };
+        let sessions = vec![
+            session("$current", Some("/repo/.git")),
+            session("$match", Some("/repo/.git")),
+            session("$other", Some("/other/.git")),
+            session("$foreign", None),
+        ];
+        assert_eq!(
+            switch_sessions(sessions.clone(), Some("$current"), Some("/repo/.git"))
+                .iter()
+                .map(|session| session.id.as_str())
+                .collect::<Vec<_>>(),
+            ["$match"]
+        );
+        assert_eq!(
+            switch_sessions(sessions, Some("$current"), None)
+                .iter()
+                .map(|session| session.id.as_str())
+                .collect::<Vec<_>>(),
+            ["$match", "$other", "$foreign"]
         );
     }
 
