@@ -219,6 +219,7 @@ esac
         sessions: &str,
         current: &str,
         fail_tmux: &str,
+        inside_tmux: bool,
     ) -> Output {
         for entry in fs::read_dir(self.dir.path()).unwrap() {
             let entry = entry.unwrap();
@@ -229,7 +230,8 @@ esac
         for (i, choice) in choices.iter().enumerate() {
             fs::write(self.dir.path().join(format!("choice-{}", i + 1)), choice).unwrap();
         }
-        let output = Command::new(env!("CARGO_BIN_EXE_grove"))
+        let mut command = Command::new(env!("CARGO_BIN_EXE_grove"));
+        command
             .args(args)
             .current_dir(self.dir.path())
             .env(
@@ -256,17 +258,26 @@ esac
             .env("TMUX_SESSIONS", sessions)
             .env("CURRENT_SESSION", current)
             .env("FAIL_TMUX", fail_tmux)
-            .env("TMUX", "fake,0,0")
-            .env("TMUX_PANE", "%1")
             .env("GIT_CONFIG_GLOBAL", "/dev/null")
             .env("GIT_CONFIG_NOSYSTEM", "1")
             .env_remove("REUSE_WORKTREE")
             .env_remove("GIT_DIR")
             .env_remove("GIT_WORK_TREE")
-            .env_remove("GIT_COMMON_DIR")
-            .output()
-            .unwrap();
-        assert_eq!(self.text("count"), choices.len().to_string());
+            .env_remove("GIT_COMMON_DIR");
+        if inside_tmux {
+            command.env("TMUX", "fake,0,0").env("TMUX_PANE", "%1");
+        } else {
+            command.env_remove("TMUX").env_remove("TMUX_PANE");
+        }
+        let output = command.output().unwrap();
+        assert_eq!(
+            self.text("count"),
+            if choices.is_empty() {
+                String::new()
+            } else {
+                choices.len().to_string()
+            }
+        );
         output
     }
 
@@ -284,12 +295,76 @@ fn session_runner_uses_isolated_current_session_and_configurable_rows() {
         "$current:current:7265706f:::::2\n$target:target:7265706f:::::1\n",
         "$current",
         "",
+        true,
     );
     assert!(output.status.success(), "{output:?}");
     let log = fixture.text("tmux.log");
     assert!(log.contains("display-message\0-p\0-t\0%1\0#{session_id}\0"));
     assert!(log.contains("list-sessions\0-F\0"));
     assert!(log.contains("switch-client\0-t\0$target\0"));
+}
+
+#[test]
+fn close_switches_to_the_selected_stable_id_before_killing_current() {
+    let fixture = Fixture::new();
+    let output = fixture.run_session(
+        &["close"],
+        &["0"],
+        "$current:human current:7265706f:::::2\n$target:unrelated label:7265706f:::::1\n",
+        "$current",
+        "",
+        true,
+    );
+    assert!(output.status.success(), "{output:?}");
+    let log = fixture.text("tmux.log");
+    let switched = log.find("switch-client\0-t\0$target\0").unwrap();
+    let killed = log.find("kill-session\0-t\0$current\0").unwrap();
+    assert!(switched < killed, "{log}");
+}
+
+#[test]
+fn close_cancellation_and_no_alternatives_are_noops() {
+    let fixture = Fixture::new();
+    let output = fixture.run_session(
+        &["close"],
+        &["cancel"],
+        "$current:current::::::2\n$target:target::::::1\n",
+        "$current",
+        "",
+        true,
+    );
+    assert!(output.status.success(), "{output:?}");
+    let log = fixture.text("tmux.log");
+    assert!(
+        !log.contains("switch-client") && !log.contains("kill-session"),
+        "{log}"
+    );
+
+    let output = fixture.run_session(
+        &["close"],
+        &[],
+        "$current:current::::::2\n",
+        "$current",
+        "",
+        true,
+    );
+    assert!(output.status.success(), "{output:?}");
+    let log = fixture.text("tmux.log");
+    assert!(
+        !log.contains("switch-client") && !log.contains("kill-session"),
+        "{log}"
+    );
+}
+
+#[test]
+fn close_outside_tmux_reports_a_clear_error() {
+    let fixture = Fixture::new();
+    let output = fixture.run_session(&["close"], &[], "", "", "", false);
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("grove close must be run inside tmux")
+    );
+    assert!(fixture.text("tmux.log").is_empty());
 }
 
 #[test]
