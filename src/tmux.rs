@@ -207,6 +207,11 @@ impl Tmux {
         Ok(())
     }
 
+    pub fn kill_session(&self, id: &str) -> Result<()> {
+        self.run(&["kill-session".into(), "-t".into(), id.into()])?;
+        Ok(())
+    }
+
     fn with_command(args: &mut Vec<String>, pane: &Pane) {
         if !pane.command.is_empty() {
             args.extend(["--".into(), "/usr/bin/env".into(), "--".into()]);
