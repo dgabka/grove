@@ -142,31 +142,6 @@ fn canonical(path: &Path) -> Result<PathBuf> {
         .with_context(|| format!("canonicalize {}", path.display()))
 }
 
-/// Canonical common Git directory for the process working directory.
-pub fn current_repo() -> Result<Option<String>> {
-    current_repo_at(&std::env::current_dir().context("get current directory")?)
-}
-
-fn current_repo_at(dir: &Path) -> Result<Option<String>> {
-    let out = git_command()
-        .current_dir(dir)
-        .args(["rev-parse", "--path-format=absolute", "--git-common-dir"])
-        .output()
-        .with_context(|| format!("run git to find current repository from {}", dir.display()))?;
-    if !out.status.success() {
-        let stderr = String::from_utf8_lossy(&out.stderr);
-        if stderr.contains("not a git repository") {
-            return Ok(None);
-        }
-        bail!("git rev-parse --git-common-dir: {}", stderr.trim_end());
-    }
-    let path = String::from_utf8(out.stdout)
-        .context("Git returned non-UTF-8 current repository identity")?;
-    let path = output_without_newline(path);
-    Ok(Some(
-        canonical(Path::new(&path))?.to_string_lossy().into_owned(),
-    ))
-}
 fn bare_marker(path: &Path) -> bool {
     path.join("HEAD").is_file() && path.join("objects").is_dir() && path.join("refs").is_dir()
 }
@@ -511,39 +486,6 @@ mod tests {
             GIT_INVOCATIONS.with(std::cell::Cell::get),
             WORKTREE_LISTS.with(std::cell::Cell::get),
         )
-    }
-
-    #[test]
-    fn current_repo_uses_canonical_common_directory_and_falls_back_outside_git() {
-        let d = TempDir::new().unwrap();
-        let main = d.path().join("main");
-        std::fs::create_dir(&main).unwrap();
-        run(&main, &["init", "-b", "main"]);
-        commit(&main);
-        let bare = d.path().join("repo.git");
-        run(
-            d.path(),
-            &[
-                "clone",
-                "--bare",
-                main.to_str().unwrap(),
-                bare.to_str().unwrap(),
-            ],
-        );
-        let linked = d.path().join("linked");
-        run(
-            &bare,
-            &["worktree", "add", linked.to_str().unwrap(), "main"],
-        );
-        let expected = bare.canonicalize().unwrap().to_string_lossy().into_owned();
-        std::fs::create_dir(linked.join("nested")).unwrap();
-        for path in [&linked, &linked.join("nested"), &bare] {
-            assert_eq!(
-                current_repo_at(path).unwrap().as_deref(),
-                Some(expected.as_str())
-            );
-        }
-        assert_eq!(current_repo_at(d.path()).unwrap(), None);
     }
 
     #[test]
