@@ -226,7 +226,30 @@ fn session_for_worktree<'a>(sessions: &'a [Session], worktree: &Path) -> Option<
         .find(|session| session.worktree.as_deref() == Some(worktree.to_string_lossy().as_ref()))
 }
 
+pub fn refresh(config: &Config, tmux: &Tmux, force: bool) -> Result<()> {
+    if config.defaults.is_empty() {
+        return Ok(());
+    }
+    let sessions = tmux.sessions()?;
+    for default in &config.defaults {
+        if let Some(session) = sessions.iter().find(|session| session.name == default.name) {
+            if !force {
+                continue;
+            }
+            tmux.kill_session(&session.id)?;
+        }
+        tmux.create_default(&default.name, &default.cwd, &default.windows)?;
+    }
+    Ok(())
+}
+
 pub fn open(config: &Config, tmux: &Tmux) -> Result<()> {
+    if config.roots.is_empty() {
+        bail!(
+            "no search roots configured; configure search roots in {}",
+            config::config_path().display()
+        );
+    }
     let repositories = discover(&config.roots, config.max_depth)?;
     if repositories.is_empty() {
         bail!(
