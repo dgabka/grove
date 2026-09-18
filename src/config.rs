@@ -13,6 +13,8 @@ pub struct Config {
     pub nerd_fonts: bool,
     #[serde(default)]
     pub presets: Vec<Preset>,
+    #[serde(default)]
+    pub defaults: Vec<DefaultSession>,
 }
 fn default_depth() -> usize {
     3
@@ -27,6 +29,7 @@ impl Default for Config {
             max_depth: default_depth(),
             nerd_fonts: default_nerd_fonts(),
             presets: vec![],
+            defaults: vec![],
         }
     }
 }
@@ -35,6 +38,14 @@ impl Default for Config {
 #[serde(deny_unknown_fields)]
 pub struct Preset {
     pub name: String,
+    #[serde(default)]
+    pub windows: Vec<Window>,
+}
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DefaultSession {
+    pub name: String,
+    pub cwd: PathBuf,
     #[serde(default)]
     pub windows: Vec<Window>,
 }
@@ -102,35 +113,55 @@ fn optional_nerd_fonts_from(path: &std::path::Path) -> Result<bool> {
 }
 
 fn validate(config: Config) -> Result<Config> {
-    if config.roots.is_empty() {
-        bail!("configuration has no roots");
-    }
     if config.roots.iter().any(|root| !root.is_absolute()) {
         bail!("configuration roots must be absolute paths");
     }
     if config.max_depth == 0 {
         bail!("max_depth must be at least 1");
     }
-    let mut names = HashSet::new();
+    let mut preset_names = HashSet::new();
     for preset in &config.presets {
         if preset.name.is_empty() || preset.name.contains(['\t', '\n', '\0']) {
             bail!("preset names must be non-empty and contain no tabs, newlines, or NULs");
         }
-        if !names.insert(&preset.name) {
+        if !preset_names.insert(&preset.name) {
             bail!("preset names must be unique");
         }
-        for window in &preset.windows {
-            if window.name.is_empty() || window.name.contains('\0') {
-                bail!("window names must be non-empty and contain no NULs");
-            }
-            for pane in &window.panes {
-                if pane.command.first().is_some_and(String::is_empty) {
-                    bail!("pane executable must not be empty");
-                }
+        validate_windows(&preset.windows)?;
+    }
+    let mut default_names = HashSet::new();
+    for default in &config.defaults {
+        if default.name.is_empty()
+            || default.name.contains(['.', ':'])
+            || default.name.chars().any(char::is_control)
+        {
+            bail!(
+                "default names must be non-empty and contain no periods, colons, or control characters"
+            );
+        }
+        if !default_names.insert(&default.name) {
+            bail!("default names must be unique");
+        }
+        if !default.cwd.is_absolute() || !default.cwd.is_dir() {
+            bail!("default cwd must be an absolute existing directory");
+        }
+        validate_windows(&default.windows)?;
+    }
+    Ok(config)
+}
+
+fn validate_windows(windows: &[Window]) -> Result<()> {
+    for window in windows {
+        if window.name.is_empty() || window.name.contains('\0') {
+            bail!("window names must be non-empty and contain no NULs");
+        }
+        for pane in &window.panes {
+            if pane.command.first().is_some_and(String::is_empty) {
+                bail!("pane executable must not be empty");
             }
         }
     }
-    Ok(config)
+    Ok(())
 }
 
 #[cfg(test)]
@@ -166,6 +197,79 @@ mod tests {
                     .unwrap()
             )
             .is_err()
+        );
+    }
+
+    #[test]
+    fn accepts_documented_defaults_without_roots() {
+        let directory = tempfile::TempDir::new().unwrap();
+        let config = format!(
+            "[[defaults]]\nname = 'main'\ncwd = {:?}\n\n[[defaults.windows]]\nname = 'editor'\n[[defaults.windows.panes]]\ncommand = ['nvim']\n\n[[defaults.windows]]\nname = 'shell'\n",
+            directory.path()
+        );
+        let config: Config = toml::from_str(&config).unwrap();
+        let config = validate(config).unwrap();
+        assert_eq!(config.defaults.len(), 1);
+        assert_eq!(config.defaults[0].cwd, directory.path());
+        assert_eq!(config.defaults[0].windows.len(), 2);
+    }
+
+    #[test]
+    fn rejects_duplicate_and_unsafe_default_names() {
+        let directory = tempfile::TempDir::new().unwrap();
+        let duplicate = format!(
+            "[[defaults]]\nname = 'main'\ncwd = {:?}\n[[defaults]]\nname = 'main'\ncwd = {:?}",
+            directory.path(),
+            directory.path()
+        );
+        assert!(validate(toml::from_str(&duplicate).unwrap()).is_err());
+        for name in ["", "a.b", "a:b", "a\tb"] {
+            let config = format!(
+                "[[defaults]]\nname = {name:?}\ncwd = {:?}",
+                directory.path()
+            );
+            assert!(
+                validate(toml::from_str(&config).unwrap()).is_err(),
+                "{name:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_invalid_default_cwds() {
+        let directory = tempfile::TempDir::new().unwrap();
+        let file = directory.path().join("file");
+        std::fs::write(&file, "").unwrap();
+        for cwd in [
+            PathBuf::from("relative"),
+            directory.path().join("missing"),
+            file,
+        ] {
+            let config = format!("[[defaults]]\nname = 'main'\ncwd = {cwd:?}");
+            assert!(
+                validate(toml::from_str(&config).unwrap()).is_err(),
+                "{cwd:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn defaults_are_strict_and_validate_layouts() {
+        let directory = tempfile::TempDir::new().unwrap();
+        for layout in [
+            "[[defaults.windows]]\nname = ''",
+            "[[defaults.windows]]\nname = 'shell'\n[[defaults.windows.panes]]\ncommand = ['']",
+        ] {
+            let config = format!(
+                "[[defaults]]\nname = 'main'\ncwd = {:?}\n{layout}",
+                directory.path()
+            );
+            let config: Config = toml::from_str(&config).unwrap();
+            assert!(validate(config).is_err(), "{layout}");
+        }
+        assert!(
+            toml::from_str::<Config>("[[defaults]]\nname = 'main'\ncwd = '/'\nunknown = true")
+                .is_err()
         );
     }
 }
