@@ -18,13 +18,34 @@ cargo install --path .
 
 Nix flake consumers can use `grove.packages.${pkgs.system}.default` directly. Copy [`example-config.toml`](example-config.toml) to `$XDG_CONFIG_HOME/grove/config.toml` (or `~/.config/grove/config.toml`). Roots must be absolute paths; `~` is not expanded. `max_depth` limits directory scanning; selecting a bare repository uses Git's registry to find its linked worktrees even outside those roots or below that depth.
 
-A pane `command` is an argv array; Grove passes its elements to tmux as separate process arguments instead of constructing a shell command string. Omitting panes leaves a shell window. New sessions first offer the built-in one-shell layout plus configured presets.
+A pane `command` is an argv array; Grove passes its elements to tmux as separate process arguments instead of constructing a shell command string. Omitting panes leaves a shell window. Interactive checkout sessions first offer the built-in one-shell layout plus configured presets.
 
 ## Commands
 
 - `grove` — select a normal checkout directly, or select a `[bare]` repository and then one of its active linked worktrees. Reuse the checkout's Grove session, or select a layout and create one.
 - `grove switch` — select any other running tmux session, most recently used first (least recently used at the bottom). `grove switch --repo` prefers other Grove sessions with the current session's repository metadata, falling back to all other sessions when none match.
 - `grove close [--repo]` — inside tmux, select and switch to another session, then remove the previous session. `--repo` uses the same preference as `switch`; cancellation or no alternatives leaves the current session unchanged.
+- `grove refresh [--force]` — initialize configured default sessions on demand. It is not a daemon and does not monitor, reconcile, or restart sessions.
+
+## Configured default sessions
+
+Use `[[defaults]]` to declare a named session with an absolute `cwd` that already exists. Its optional `windows` and `panes` use the same shape as presets. Omitting `windows` creates one shell window; omitting `panes` creates a shell in that window. Pane `command` values are argv arrays, so each configured element is passed literally to tmux rather than joined into a shell command.
+
+```toml
+[[defaults]]
+name = "main"
+cwd = "/Users/you"
+
+[[defaults.windows]]
+name = "editor"
+[[defaults.windows.panes]]
+command = ["nvim"]
+
+[[defaults.windows]]
+name = "shell"
+```
+
+`grove refresh` creates missing defaults in configuration order. If a session with the exact configured name already exists, Grove skips it regardless of its origin, current directory, or layout; it performs no reconciliation. `grove refresh --force` instead kills and replaces every same-named session, including foreign sessions and the current session. This is destructive: if replacement fails after the kill, Grove cannot restore the old session.
 
 Cancelling either repository/worktree picker or the layout picker is a no-op. Bare entries show a branch/tree Nerd Font glyph (``, U+F418), or `[bare]` when `nerd_fonts = false`, in a dedicated first column; checkout and session rows leave that column blank so names align. Bare entries show a path, never a branch. A bare repository is never a session checkout; if it has no eligible worktrees, Grove prints a message and exits without a layout picker or session creation. Main checkout labels show repository and path without a branch; linked worktrees show `repository/worktree`, path, and their branch (`nerd_fonts = true`, the default, uses a Nerd Font branch glyph; `false` uses `branch:`). Repository, worktree, and structured session picker paths show `~` for `$HOME` and `~/relative/path` beneath it (including a symlinked home's canonical location); paths outside home or with unset/empty `$HOME` stay unchanged. This is display-only: checkout identity, session metadata, and working directories retain their full paths. Picker name, path, and branch columns align by terminal display width after shortening; control characters are escaped for display only. Grove stores the display name, plain label, and branch separately from repository and checkout identity, so both pickers render the current font preference. Older label-only and foreign sessions remain readable as single-column entries. Long rows may exceed narrow terminals, and glyph widths depend on the terminal font. `grove switch` reads this presentation setting when the config exists and still works with no config file.
 
