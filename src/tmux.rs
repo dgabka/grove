@@ -1,10 +1,11 @@
 use crate::{
-    config::{Pane, Preset},
+    config::{Pane, Preset, Window},
     git::Checkout,
 };
 use anyhow::{Context, Result, bail};
 use std::{
     cmp::Reverse,
+    path::Path,
     process::{Command, Stdio},
 };
 
@@ -230,18 +231,40 @@ impl Tmux {
     }
 
     pub fn create(&self, name: &str, checkout: &Checkout, preset: &Preset) -> Result<String> {
+        let cwd = checkout.worktree.to_string_lossy().into_owned();
+        let branch = checkout
+            .linked
+            .then(|| checkout.branch.clone().unwrap_or_else(|| "detached".into()));
+        let mut metadata = vec![
+            ("@grove_repo", checkout.repo.clone()),
+            ("@grove_worktree", cwd.clone()),
+            ("@grove_label", checkout.base_label()),
+            ("@grove_name", checkout.display_name()),
+        ];
+        if let Some(branch) = branch {
+            metadata.push(("@grove_branch", branch));
+        }
+        self.create_layout(name, &cwd, &preset.windows, &metadata)
+    }
+
+    pub fn create_default(&self, name: &str, cwd: &Path, windows: &[Window]) -> Result<String> {
+        self.create_layout(name, &cwd.to_string_lossy(), windows, &[])
+    }
+
+    fn create_layout(
+        &self,
+        name: &str,
+        cwd: &str,
+        windows: &[Window],
+        metadata: &[(&str, String)],
+    ) -> Result<String> {
         let mut created_session = None;
         let result = (|| {
-            let cwd = checkout.worktree.to_string_lossy().into_owned();
-            let cwd_arg = tmux_path(&cwd);
-            let first = preset
-                .windows
-                .first()
-                .cloned()
-                .unwrap_or_else(|| crate::config::Window {
-                    name: "shell".into(),
-                    panes: vec![],
-                });
+            let cwd_arg = tmux_path(cwd);
+            let first = windows.first().cloned().unwrap_or_else(|| Window {
+                name: "shell".into(),
+                panes: vec![],
+            });
             let mut new = vec![
                 "new-session".into(),
                 "-d".into(),
@@ -268,27 +291,17 @@ impl Tmux {
                 window.into(),
                 first.name,
             ])?;
-            let branch = checkout
-                .linked
-                .then(|| checkout.branch.clone().unwrap_or_else(|| "detached".into()));
-            for (key, value) in [
-                ("@grove_repo", Some(checkout.repo.clone())),
-                ("@grove_worktree", Some(cwd.clone())),
-                ("@grove_label", Some(checkout.base_label())),
-                ("@grove_name", Some(checkout.display_name())),
-                ("@grove_branch", branch),
-            ] {
-                let Some(value) = value else { continue };
+            for (key, value) in metadata {
                 self.execute(vec![
                     "set-option".into(),
                     "-t".into(),
                     session.into(),
-                    key.into(),
-                    hex(&value),
+                    key.to_string(),
+                    hex(value),
                 ])?;
             }
             self.add_panes(window, &first.panes, &cwd_arg)?;
-            for window in preset.windows.iter().skip(1) {
+            for window in windows.iter().skip(1) {
                 let mut args = vec![
                     "new-window".into(),
                     "-d".into(),
@@ -338,6 +351,7 @@ impl Tmux {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::DefaultSession;
     use std::{fs, process::Command};
     use tempfile::TempDir;
 
@@ -497,6 +511,92 @@ mod tests {
     }
 
     #[test]
+    fn default_layout_has_no_metadata_and_preserves_argv() {
+        let Some(server) = Server::new("set -g base-index 1\n") else {
+            return;
+        };
+        let directory = TempDir::new().unwrap();
+        let output = directory.path().join("argv");
+        let script = directory.path().join("executable");
+        fs::write(
+            &script,
+            format!(
+                "#!/bin/sh\nprintf '%s\\n' \"$#\" \"$1\" > '{}'\nsleep 60\n",
+                output.display()
+            ),
+        )
+        .unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        let mut permissions = fs::metadata(&script).unwrap().permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&script, permissions).unwrap();
+        let default = DefaultSession {
+            name: "default-test".into(),
+            cwd: directory.path().to_owned(),
+            windows: vec![
+                Window {
+                    name: "command".into(),
+                    panes: vec![Pane {
+                        command: vec![script.to_string_lossy().into_owned(), "$(literal)".into()],
+                    }],
+                },
+                Window {
+                    name: "shell".into(),
+                    panes: vec![],
+                },
+            ],
+        };
+        let id = server
+            .tmux
+            .create_default(&default.name, &default.cwd, &default.windows)
+            .unwrap();
+        let session = server.tmux.sessions().unwrap().pop().unwrap();
+        assert_eq!(session.id, id);
+        assert_eq!(session.repo, None);
+        assert_eq!(session.worktree, None);
+        assert_eq!(session.label_meta, None);
+        assert_eq!(session.name_meta, None);
+        assert_eq!(session.branch, None);
+        let panes = server
+            .tmux
+            .refs(&["list-panes", "-s", "-t", &id, "-F", "#{pane_current_path}"])
+            .unwrap();
+        assert!(
+            panes
+                .lines()
+                .all(|path| path == directory.path().canonicalize().unwrap().to_string_lossy())
+        );
+        for _ in 0..200 {
+            if matches!(
+                fs::read_to_string(&output).as_deref(),
+                Ok("1\n$(literal)\n")
+            ) {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(25));
+        }
+        assert_eq!(fs::read_to_string(output).unwrap(), "1\n$(literal)\n");
+
+        let shell = DefaultSession {
+            name: "default-shell".into(),
+            cwd: directory.path().to_owned(),
+            windows: vec![],
+        };
+        let shell_id = server
+            .tmux
+            .create_default(&shell.name, &shell.cwd, &shell.windows)
+            .unwrap();
+        assert_eq!(
+            server
+                .tmux
+                .refs(&["list-windows", "-t", &shell_id, "-F", "#{window_name}"])
+                .unwrap()
+                .trim(),
+            "shell"
+        );
+    }
+
+    #[test]
     fn session_labels_render_new_branch_metadata_and_preserve_old_labels() {
         let mut session = Session {
             id: "$1".into(),
@@ -589,21 +689,20 @@ mod tests {
             return;
         };
         let directory = TempDir::new().unwrap();
-        let checkout = Checkout {
-            repo: "r".into(),
-            worktree: directory.path().canonicalize().unwrap(),
-            repo_name: "r".into(),
-            branch: None,
-            linked: false,
-        };
-        let preset = Preset {
-            name: "bad".into(),
-            windows: vec![crate::config::Window {
+        let default = DefaultSession {
+            name: "rollback".into(),
+            cwd: directory.path().to_owned(),
+            windows: vec![Window {
                 name: "bad\0name".into(),
                 panes: vec![],
             }],
         };
-        assert!(server.tmux.create("rollback", &checkout, &preset).is_err());
+        assert!(
+            server
+                .tmux
+                .create_default(&default.name, &default.cwd, &default.windows)
+                .is_err()
+        );
         assert!(server.tmux.sessions().unwrap().is_empty());
     }
 }
