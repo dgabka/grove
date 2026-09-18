@@ -114,11 +114,13 @@ case "$1" in
     list-sessions)
         if [ -n "${TMUX_SESSIONS-}" ]; then
             printf '%s' "$TMUX_SESSIONS"
-        elif [ -n "$REUSE_WORKTREE" ]; then
+        elif [ -n "${REUSE_WORKTREE-}" ]; then
             printf '$7:old manually named session:7265706f:%s::::0\n' "$REUSE_WORKTREE"
         fi;;
-    new-session) printf '$8\t@1\n';;
-    rename-window|set-option|attach-session) :;;
+    new-session)
+        [ "${FAIL_TMUX-}" != new-session ] || exit 1
+        printf '$8\t@1\n';;
+    rename-window|set-option|attach-session|new-window|split-window) :;;
     switch-client) [ "${FAIL_TMUX-}" != switch ];;
     kill-session) [ "${FAIL_TMUX-}" != kill ];;
     *) exit 91;;
@@ -281,9 +283,133 @@ esac
         output
     }
 
+    fn refresh(&self, defaults: &str, force: bool, sessions: &str, fail_tmux: &str) -> Output {
+        fs::write(
+            self.dir.path().join("config/grove/config.toml"),
+            format!("{defaults}\n"),
+        )
+        .unwrap();
+        self.run_session(
+            if force {
+                &["refresh", "--force"]
+            } else {
+                &["refresh"]
+            },
+            &[],
+            sessions,
+            "",
+            fail_tmux,
+            false,
+        )
+    }
+
     fn text(&self, name: &str) -> String {
         fs::read_to_string(self.dir.path().join(name)).unwrap_or_default()
     }
+}
+
+#[test]
+fn refresh_creates_missing_defaults_without_fzf_or_git() {
+    let fixture = Fixture::new();
+    script(
+        &fixture.dir.path().join("bin/git"),
+        "touch \"$TEST_DIR/git-called\"",
+    );
+    let cwd = fixture.dir.path().join("default cwd");
+    fs::create_dir(&cwd).unwrap();
+    let output = fixture.refresh(
+        &format!(
+            "[[defaults]]\nname = 'first'\ncwd = {:?}\n[[defaults]]\nname = 'second'\ncwd = {:?}",
+            cwd, cwd
+        ),
+        false,
+        "",
+        "",
+    );
+    assert!(output.status.success(), "{output:?}");
+    assert!(fixture.text("count").is_empty());
+    assert!(!fixture.dir.path().join("git-called").exists());
+    let log = fixture.text("tmux.log");
+    assert_eq!(log.matches("list-sessions\0-F\0").count(), 1);
+    assert!(log.find("-s\0first\0").unwrap() < log.find("-s\0second\0").unwrap());
+}
+
+#[test]
+fn refresh_skips_collisions_and_force_kills_ids_before_recreating() {
+    let fixture = Fixture::new();
+    let cwd = fixture.dir.path();
+    let defaults = format!(
+        "[[defaults]]\nname = 'main'\ncwd = {:?}\n[[defaults]]\nname = 'other'\ncwd = {:?}",
+        cwd, cwd
+    );
+    let output = fixture.refresh(&defaults, false, "$foreign:main::::::0\n", "");
+    assert!(output.status.success(), "{output:?}");
+    let log = fixture.text("tmux.log");
+    assert!(
+        !log.contains("-s\0main\0") && log.contains("-s\0other\0"),
+        "{log}"
+    );
+
+    let output = fixture.refresh(&defaults, true, "$one:main::::::0\n$two:other::::::0\n", "");
+    assert!(output.status.success(), "{output:?}");
+    let log = fixture.text("tmux.log");
+    let kill_one = log.find("kill-session\0-t\0$one\0").unwrap();
+    let create_one = log.find("-s\0main\0").unwrap();
+    let kill_two = log.find("kill-session\0-t\0$two\0").unwrap();
+    let create_two = log.find("-s\0other\0").unwrap();
+    assert!(
+        kill_one < create_one && create_one < kill_two && kill_two < create_two,
+        "{log}"
+    );
+}
+
+#[test]
+fn refresh_stops_at_first_creation_error_and_preserves_literal_argv() {
+    let fixture = Fixture::new();
+    let cwd = fixture.dir.path();
+    let defaults = format!(
+        "[[defaults]]\nname = 'first'\ncwd = {:?}\n[[defaults.windows]]\nname = 'window'\n[[defaults.windows.panes]]\ncommand = ['echo space', '界', '$(literal)']\n[[defaults]]\nname = 'later'\ncwd = {:?}",
+        cwd, cwd
+    );
+    let output = fixture.refresh(&defaults, false, "", "");
+    assert!(output.status.success(), "{output:?}");
+    let log = fixture.text("tmux.log");
+    assert!(
+        log.contains("--\0/usr/bin/env\0--\0echo space\0界\0$(literal)\0"),
+        "{log}"
+    );
+
+    let output = fixture.refresh(&defaults, false, "", "new-session");
+    assert!(!output.status.success());
+    let log = fixture.text("tmux.log");
+    assert!(
+        log.contains("-s\0first\0") && !log.contains("-s\0later\0"),
+        "{log}"
+    );
+}
+
+#[test]
+fn defaults_only_refresh_succeeds_but_open_requires_roots() {
+    let fixture = Fixture::new();
+    let cwd = fixture.dir.path();
+    assert!(
+        fixture
+            .refresh(&format!("roots = [{cwd:?}]"), false, "", "")
+            .status
+            .success()
+    );
+    assert!(fixture.text("tmux.log").is_empty());
+    let defaults = format!("[[defaults]]\nname = 'main'\ncwd = {:?}", cwd);
+    assert!(fixture.refresh(&defaults, false, "", "").status.success());
+    fs::write(
+        fixture.dir.path().join("config/grove/config.toml"),
+        defaults,
+    )
+    .unwrap();
+    let output = fixture.run_session(&[], &[], "", "", "", false);
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("no search roots configured"));
+    assert!(fixture.text("tmux.log").is_empty());
 }
 
 #[test]

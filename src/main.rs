@@ -17,6 +17,10 @@ enum Command {
         #[arg(long)]
         repo: bool,
     },
+    Refresh {
+        #[arg(long)]
+        force: bool,
+    },
 }
 fn main() -> Result<()> {
     let cli = Cli::parse();
@@ -24,6 +28,7 @@ fn main() -> Result<()> {
     match cli.command {
         Some(Command::Switch { repo }) => grove::switch(&tmux, repo),
         Some(Command::Close { repo }) => grove::close(&tmux, repo),
+        Some(Command::Refresh { force }) => grove::refresh(&grove::config::load()?, &tmux, force),
         None => grove::open(&grove::config::load()?, &tmux),
     }
 }
@@ -53,6 +58,12 @@ mod tests {
                 .unwrap()
                 .command,
             Some(Command::Close { repo: true })
+        ));
+        assert!(matches!(
+            Cli::try_parse_from(["grove", "refresh", "--force"])
+                .unwrap()
+                .command,
+            Some(Command::Refresh { force: true })
         ));
     }
 }
