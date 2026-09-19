@@ -49,23 +49,26 @@ Use `grove --help` for commands and `grove --version` for the installed version.
 
 Cancelling a picker exits successfully without changing sessions.
 
-## Configured default sessions
+## Configuration
 
-Use `[[defaults]]` to declare a named session with an absolute `cwd` that already exists. Its optional `windows` and `panes` use the same shape as presets. Omitting `windows` creates one shell window; omitting `panes` creates a shell in that window. Pane `command` values are argv arrays, so each configured element is passed literally to tmux rather than joined into a shell command.
+Grove reads `GROVE_CONFIG` when it is nonempty. Otherwise it reads `$XDG_CONFIG_HOME/grove/config.toml`, then `~/.config/grove/config.toml`, or `./grove/config.toml` if `HOME` is unavailable. See [`example-config.toml`](example-config.toml) for the complete shape.
+
+- `roots` lists absolute repository roots. `max_depth` limits discovery depth and defaults to `3`.
+- `nerd_fonts` controls glyph labels and defaults to `true`; set it to `false` for plain-text labels.
+- `[[presets]]` names layouts offered after selecting a checkout. `[[defaults]]` names sessions that `grove refresh` creates, each with an absolute, existing `cwd`.
+- Presets and defaults contain named `windows`, which contain `panes`. Omitting windows creates a shell window; omitting panes creates a shell pane.
 
 ```toml
-[[defaults]]
-name = "main"
-cwd = "/Users/you"
-
-[[defaults.windows]]
+[[presets]]
 name = "editor"
-[[defaults.windows.panes]]
-command = ["nvim"]
 
-[[defaults.windows]]
-name = "shell"
+[[presets.windows]]
+name = "main"
+[[presets.windows.panes]]
+command = ["nvim", "-S"]
 ```
+
+Pane commands are literal argv arrays, not shell strings; their executables (such as `nvim`) must be on `PATH`. Paths must be absolute where required, and `~` is not expanded. Configuration is strict: unknown keys are rejected. Names must be nonempty and unique; default-session names also cannot contain periods, colons, or control characters.
 
 `grove refresh` creates missing defaults in configuration order. If a session with the exact configured name already exists, Grove skips it regardless of its origin, current directory, or layout; it performs no reconciliation. `grove refresh --force` instead kills and replaces every same-named session, including foreign sessions and the current session. This is destructive: if replacement fails after the kill, Grove cannot restore the old session.
 

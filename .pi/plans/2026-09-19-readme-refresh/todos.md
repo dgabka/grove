@@ -46,6 +46,7 @@ Do not invent aliases, background supervision, or worktree-management behavior.
 
 ## readme-refresh-3 — Write the concise configuration reference
 
+**Status:** Done
 **Tag:** `readme-refresh`
 
 Explain config lookup, `GROVE_CONFIG`, `roots`, `max_depth`, `nerd_fonts`, presets, defaults, windows, panes, and strict validation. State the defaults (`max_depth = 3`, `nerd_fonts = true`), absolute-path requirements, lack of `~` expansion, rejection of unknown keys, and default-session name restrictions. Explain that pane commands are argv arrays and example executables must be on `PATH`.
