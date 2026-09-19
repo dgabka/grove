@@ -184,17 +184,19 @@ impl Tmux {
     }
 
     pub fn current_session(&self) -> Result<Option<String>> {
-        let Some(pane) = std::env::var_os("TMUX_PANE") else {
+        if std::env::var_os("TMUX").is_none() {
             return Ok(None);
-        };
-        let id = self.run(&[
-            "display-message".into(),
-            "-p".into(),
-            "-t".into(),
-            pane.into_string()
-                .map_err(|_| anyhow::anyhow!("TMUX_PANE is not valid Unicode"))?,
-            "#{session_id}".into(),
-        ])?;
+        }
+        let mut args = vec!["display-message".into(), "-p".into()];
+        if let Some(pane) = std::env::var_os("TMUX_PANE") {
+            args.extend([
+                "-t".into(),
+                pane.into_string()
+                    .map_err(|_| anyhow::anyhow!("TMUX_PANE is not valid Unicode"))?,
+            ]);
+        }
+        args.push("#{session_id}".into());
+        let id = self.run(&args)?;
         Ok(Some(id.trim().to_owned()))
     }
 
