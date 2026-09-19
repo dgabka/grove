@@ -309,6 +309,43 @@ esac
 }
 
 #[test]
+fn custom_config_path_overrides_standard_and_empty_value_falls_back() {
+    let fixture = Fixture::new();
+    let standard = fixture.dir.path().join("config/grove/config.toml");
+    let alternate = fixture.dir.path().join("alternate.toml");
+    fs::write(&standard, "roots = [").unwrap();
+    fs::write(&alternate, "roots = []").unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_grove"))
+        .current_dir(fixture.dir.path())
+        .env("HOME", fixture.dir.path())
+        .env("XDG_CONFIG_HOME", fixture.dir.path().join("config"))
+        .env("GROVE_CONFIG", &alternate)
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("no search roots configured"), "{stderr}");
+    assert!(
+        stderr.contains(&alternate.display().to_string()),
+        "{stderr}"
+    );
+    assert!(!stderr.contains("parse configuration"), "{stderr}");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_grove"))
+        .current_dir(fixture.dir.path())
+        .env("HOME", fixture.dir.path())
+        .env("XDG_CONFIG_HOME", fixture.dir.path().join("config"))
+        .env("GROVE_CONFIG", "")
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("parse configuration"), "{stderr}");
+    assert!(stderr.contains(&standard.display().to_string()), "{stderr}");
+}
+
+#[test]
 fn refresh_creates_missing_defaults_without_fzf_or_git() {
     let fixture = Fixture::new();
     script(
