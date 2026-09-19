@@ -28,6 +28,7 @@ Use a clearly illustrative absolute path. Mention `grove --help` and `grove --ve
 
 ## readme-refresh-2 — Replace the command reference
 
+**Status:** Done
 **Tag:** `readme-refresh`
 
 Write short descriptions for `grove`, `grove switch [--repo]`, `grove close [--repo]`, and `grove refresh [--force]`. Keep the successful no-op behavior for picker cancellation. State that `close` requires tmux, switches first, and preserves the old session when navigation does not succeed. Put the destructive `refresh --force` warning beside that command.

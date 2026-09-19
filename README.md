@@ -42,10 +42,12 @@ Use `grove --help` for commands and `grove --version` for the installed version.
 
 ## Commands
 
-- `grove` — select a normal checkout directly, or select a `[bare]` repository and then one of its active linked worktrees. Reuse the checkout's Grove session, or select a layout and create one.
-- `grove switch` — select any other running tmux session, most recently used first (least recently used at the bottom). `grove switch --repo` prefers other Grove sessions with the current session's repository metadata, falling back to all other sessions when none match.
-- `grove close [--repo]` — inside tmux, select and switch to another session, then remove the previous session. `--repo` uses the same preference as `switch`; cancellation or no alternatives leaves the current session unchanged.
-- `grove refresh [--force]` — initialize configured default sessions on demand. It is not a daemon and does not monitor, reconcile, or restart sessions.
+- `grove` — select a checkout directly, or select a bare repository and then one of its active linked worktrees. Reuse its Grove session, or select a layout and create one.
+- `grove switch [--repo]` — select another running tmux session. `--repo` prefers Grove sessions with the current session's repository metadata, then falls back to all other sessions.
+- `grove close [--repo]` — requires tmux. Select another session, switch to it, then remove the old session only after navigation succeeds. `--repo` uses the same preference as `switch`; cancellation, no alternatives, or failed navigation preserves the old session.
+- `grove refresh [--force]` — create missing configured default sessions on demand; it does not supervise them. **`--force` destructively kills every same-named session, including current or unrelated sessions, before replacement. A failed replacement cannot restore the old session.**
+
+Cancelling a picker exits successfully without changing sessions.
 
 ## Configured default sessions
 
