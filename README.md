@@ -68,7 +68,7 @@ name = "main"
 command = ["nvim", "-S"]
 ```
 
-Pane commands are literal argv arrays, not shell strings; their executables (such as `nvim`) must be on `PATH`. Paths must be absolute where required, and `~` is not expanded. Configuration is strict: unknown keys are rejected. Names must be nonempty and unique; default-session names also cannot contain periods, colons, or control characters.
+Pane commands are literal argv arrays, not shell strings; their executables (such as `nvim`) must be on `PATH`. Paths must be absolute where required, and `~` is not expanded. Configuration is strict: unknown keys are rejected. Preset and default-session names must be nonempty and unique; default-session names also cannot contain periods, colons, or control characters. Window names must be nonempty.
 
 `grove refresh` creates missing defaults in configuration order. If a session with the exact configured name already exists, Grove skips it regardless of its origin, current directory, or layout; it performs no reconciliation. `grove refresh --force` instead kills and replaces every same-named session, including foreign sessions and the current session. This is destructive: if replacement fails after the kill, Grove cannot restore the old session.
 

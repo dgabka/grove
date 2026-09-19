@@ -119,6 +119,7 @@ Do not add contributor tooling or a separate contributor guide.
 
 ## readme-refresh-6 — Verify the finished README against the plan
 
+**Status:** Done
 **Tag:** `readme-refresh`
 
 Read the complete rewritten `README.md` and check every item in the plan's Ideal State Criteria. Verify command names against clap, configuration claims against `src/config.rs`, packaging claims against `flake.nix`, and safety behavior against `src/lib.rs` plus existing tests. Correct documentation mistakes only.
