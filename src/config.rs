@@ -75,6 +75,10 @@ impl Preset {
 }
 
 pub fn config_path() -> PathBuf {
+    if let Some(path) = std::env::var_os("GROVE_CONFIG").filter(|value| !value.is_empty()) {
+        return PathBuf::from(path);
+    }
+
     std::env::var_os("XDG_CONFIG_HOME")
         .map(PathBuf::from)
         .unwrap_or_else(|| {
