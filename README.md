@@ -20,7 +20,7 @@ Nix flake consumers can use `grove.packages.${pkgs.system}.default` directly.
 
 ## Quick start
 
-Create `$XDG_CONFIG_HOME/grove/config.toml` (or `~/.config/grove/config.toml`) with one absolute repository root:
+Create the selected config file with one absolute repository root. By default this is `~/.config/grove/config.toml`, unless `$XDG_CONFIG_HOME` is set:
 
 ```toml
 roots = ["/home/you/repos"]
@@ -44,14 +44,16 @@ Use `grove --help` for commands and `grove --version` for the installed version.
 
 - `grove` — select a checkout directly, or select a bare repository and then one of its active linked worktrees. Reuse its Grove session, or select a layout and create one.
 - `grove switch [--repo]` — select another running tmux session. `--repo` prefers Grove sessions with the current session's repository metadata, then falls back to all other sessions.
-- `grove close [--repo]` — requires tmux. Select another session, switch to it, then remove the old session only after navigation succeeds. `--repo` uses the same preference as `switch`; cancellation, no alternatives, or failed navigation preserves the old session.
+- `grove close [--repo]` — must run inside tmux. Select another session, switch to it, then remove the old session only after navigation succeeds. `--repo` uses the same preference as `switch`; cancellation, no alternatives, or failed navigation preserves the old session.
 - `grove refresh [--force]` — create missing configured default sessions on demand; it does not supervise them. **`--force` destructively kills every same-named session, including current or unrelated sessions, before replacement. A failed replacement cannot restore the old session.**
 
 Cancelling a picker exits successfully without changing sessions.
 
 ## Configuration
 
-Grove reads `GROVE_CONFIG` when it is nonempty. Otherwise it reads `$XDG_CONFIG_HOME/grove/config.toml`, then `~/.config/grove/config.toml`, or `./grove/config.toml` if `HOME` is unavailable. See [`example-config.toml`](example-config.toml) for the complete shape.
+A nonempty `GROVE_CONFIG` is authoritative. Otherwise Grove selects `$XDG_CONFIG_HOME/grove/config.toml` when `XDG_CONFIG_HOME` is set, `~/.config/grove/config.toml` when `HOME` is set, or `./grove/config.toml` otherwise. Read or parse failures do not fall back. See [`example-config.toml`](example-config.toml) for the complete shape.
+
+`grove` and `grove refresh` fail if the selected config file is missing; `grove switch` and `grove close` can run without one. Empty `roots` blocks repository opening, but configured defaults can still be refreshed.
 
 - `roots` lists absolute repository roots. `max_depth` limits discovery depth and defaults to `3`.
 - `nerd_fonts` controls glyph labels and defaults to `true`; set it to `false` for plain-text labels.
