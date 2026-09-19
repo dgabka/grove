@@ -16,7 +16,13 @@ Or install with a current Rust toolchain; this requires `git`, `tmux`, and `fzf`
 cargo install --path .
 ```
 
-Nix flake consumers can use `grove.packages.${pkgs.system}.default` directly. Copy [`example-config.toml`](example-config.toml) to `$XDG_CONFIG_HOME/grove/config.toml` (or `~/.config/grove/config.toml`). Roots must be absolute paths; `~` is not expanded. `max_depth` limits directory scanning; selecting a bare repository uses Git's registry to find its linked worktrees even outside those roots or below that depth.
+Nix flake consumers can use `grove.packages.${pkgs.system}.default` directly. Copy [`example-config.toml`](example-config.toml) to `$XDG_CONFIG_HOME/grove/config.toml` (or `~/.config/grove/config.toml`). To use another file, set `GROVE_CONFIG`:
+
+```sh
+GROVE_CONFIG=./config-under-test.toml grove
+```
+
+A nonempty `GROVE_CONFIG` takes precedence and is used as the exact path (relative paths are relative to the current working directory). It is authoritative: read or parse failures do not fall back to the standard location. An empty value uses the standard location. Roots must be absolute paths; `~` is not expanded. `max_depth` limits directory scanning; selecting a bare repository uses Git's registry to find its linked worktrees even outside those roots or below that depth.
 
 A pane `command` is an argv array; Grove passes its elements to tmux as separate process arguments instead of constructing a shell command string. Omitting panes leaves a shell window. Interactive checkout sessions first offer the built-in one-shell layout plus configured presets.
 
