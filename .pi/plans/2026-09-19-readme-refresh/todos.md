@@ -72,6 +72,7 @@ Do not duplicate every validation error or change `example-config.toml`.
 
 ## readme-refresh-4 — Condense repository and session behavior
 
+**Status:** Done
 **Tag:** `readme-refresh`
 
 Replace the implementation-heavy discovery and picker prose with concise user-visible behavior. Cover direct checkout selection, selected-bare-only worktree selection, empty bare repositories, metadata-based session reuse, stable naming, collision suffixes, spaces and Unicode, and optional Nerd Font presentation.
