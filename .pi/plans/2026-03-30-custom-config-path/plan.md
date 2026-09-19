@@ -142,3 +142,8 @@ Update `config_path()` to return a non-empty `GROVE_CONFIG` value before evaluat
     ```sh
     GROVE_CONFIG=./config-under-test.toml grove
     ```
+
+- [x] **Review fix P1 — Isolate shared integration child commands from `GROVE_CONFIG`** `[custom-config-path]`
+  - **Target:** `tests/two_stage.rs`
+  - **Intent:** Ensure `run_mutating` and `run_session` remove any inherited `GROVE_CONFIG`, while TODO 2 continues to set its override explicitly on its direct child commands.
+  - **Verification:** `cargo test --test two_stage custom_config_path_overrides_standard_and_empty_value_falls_back`, `cargo fmt --check`, `cargo clippy --all-targets --all-features -- -D warnings`, and `cargo test`.

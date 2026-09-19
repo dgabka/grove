@@ -208,6 +208,7 @@ esac
             .env_remove("GIT_DIR")
             .env_remove("GIT_WORK_TREE")
             .env_remove("GIT_COMMON_DIR")
+            .env_remove("GROVE_CONFIG")
             .output()
             .unwrap();
         assert_eq!(self.text("count"), choices.len().to_string());
@@ -265,7 +266,8 @@ esac
             .env_remove("REUSE_WORKTREE")
             .env_remove("GIT_DIR")
             .env_remove("GIT_WORK_TREE")
-            .env_remove("GIT_COMMON_DIR");
+            .env_remove("GIT_COMMON_DIR")
+            .env_remove("GROVE_CONFIG");
         if inside_tmux {
             command.env("TMUX", "fake,0,0").env("TMUX_PANE", "%1");
         } else {
