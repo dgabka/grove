@@ -92,6 +92,7 @@ Use this level of wording rather than internal algorithms: “Selecting a bare r
 
 ## readme-refresh-5 — Minimize integration and maintainer sections
 
+**Status:** Done
 **Tag:** `readme-refresh`
 
 Retain the tmux popup examples, release procedure, and development checks in compact sections. Replace the exhaustive test inventory with the standard commands and one safety note: real tmux tests use dedicated isolated sockets and never the normal tmux server.

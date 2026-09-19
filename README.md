@@ -87,19 +87,25 @@ bind g display-popup -E -w 60% -h 80% 'grove'
 bind G display-popup -E -w 60% -h 80% 'grove switch'
 ```
 
-The popup command is a tmux configuration example; Grove itself invokes Git, tmux, and fzf with process argument arrays.
-
 ## Releases
 
-The crate version is Grove's version (`grove --version`). Create a version commit and matching tag from a clean working tree, then push them:
+From a clean working tree, create and push the version commit and matching tag:
 
 ```sh
 scripts/release 0.2.0
 git push origin HEAD v0.2.0
 ```
 
-The script updates `Cargo.toml` and `Cargo.lock`, runs the tests, commits, and tags. The release workflow verifies the version and publishes Linux and macOS archives with checksums to a GitHub release.
+The script updates the crate version, runs checks, commits, and tags the release.
 
-## Tests
+## Development
 
-`cargo test` uses temporary Git repositories. The tmux tests use unique `-L` server sockets with isolated temporary configuration files and kill only those sockets. Discovery covers checkout/bare-content pruning, independent nested roots, invalid markers, direct-bare/`.bare` hubs, ordinary and separate-git-dir repositories, linked-only anchors, and stale worktree records. Picker protocol tests use fake `fzf` executables. CLI flow tests use fake `fzf` and tmux executables to check both selection stages, cancellation, empty bare repositories, and metadata reuse without accessing a real tmux server; isolated real tmux tests also run when tmux is installed.
+Optionally enter the development shell with `nix develop`, then run:
+
+```sh
+cargo fmt --check
+cargo clippy --all-targets --all-features -- -D warnings
+cargo test
+```
+
+Real tmux tests use dedicated isolated sockets and never the normal tmux server.
