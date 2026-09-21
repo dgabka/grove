@@ -1,0 +1,11 @@
+{
+  "id": "TODO-0004",
+  "title": "Cover scripted session creation end to end",
+  "body": "Plan: `.pi/plans/2026-09-20-scripted-session/plan.md`\n\nModify: `tests/two_stage.rs`\n\nExtend the existing fixture runner minimally so tests can invoke the binary with top-level opening arguments while retaining the fake fzf, fake tmux, dedicated `GROVE_TMUX_SOCKET`, Git environment isolation, and mutation support. Do not create a second fixture or contact the normal tmux server.\n\nReference: `tests/two_stage.rs:11-112` — temporary normal/bare/linked repository setup and fake subprocesses. Reference: `tests/two_stage.rs:120-197` — opening-flow runner and picker-count assertions. Reference: `tests/two_stage.rs:199-272` — argument-capable session runner pattern.\n\nAdd focused end-to-end cases proving:\n- normal checkout plus configured preset creates/navigates without any picker;\n- linked worktree plus configured preset uses linked naming/metadata;\n- omitted preset opens only the layout picker and cancellation is a no-op;\n- an explicit checkout outside configured roots (including empty roots if easiest) succeeds;\n- unknown preset errors without tmux creation;\n- matching worktree metadata reuses the session before preset lookup/picker;\n- occupied preferred name retains existing suffix behavior;\n- bare and non-Git explicit paths fail without picker/tmux mutation;\n- picker-time checkout replacement remains blocked by second validation.\n\nUse argv arguments throughout and assertions that preserve spaces/Unicode where the fixture already supports them. Avoid retesting Clap-only relative-path and dependency rules already covered in `src/main.rs`.\n\nAcceptance: ISC-1 through ISC-7 and ISC-10 through ISC-12 have end-to-end evidence; ISC-A-1 and ISC-A-2 remain true; `cargo test --test two_stage` passes.\n\nDependencies: TODO-0001, TODO-0002, TODO-0003.",
+  "tags": [
+    "scripted-session"
+  ],
+  "status": "closed",
+  "createdAt": "2026-09-21T06:49:23.984Z",
+  "updatedAt": "2026-09-21T06:49:23.984Z"
+}

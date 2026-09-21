@@ -135,15 +135,17 @@ esac
     }
 
     fn run(&self, choices: &[&str], reuse: Option<&Path>, nerd_fonts: bool) -> Output {
-        let output = self.run_mutating(choices, reuse, nerd_fonts, None);
+        let output = self.run_mutating(&[], choices, reuse, "", nerd_fonts, None);
         assert!(output.status.success(), "{:?}", output);
         output
     }
 
     fn run_mutating(
         &self,
+        args: &[&str],
         choices: &[&str],
         reuse: Option<&Path>,
+        sessions: &str,
         nerd_fonts: bool,
         mutation: Option<(usize, &Path, &str)>,
     ) -> Output {
@@ -178,6 +180,7 @@ esac
             .unwrap_or_default();
         let (stage, path, mutation) = mutation.unwrap_or((0, self.dir.path(), ""));
         let output = Command::new(env!("CARGO_BIN_EXE_grove"))
+            .args(args)
             .current_dir(self.dir.path())
             .env(
                 "PATH",
@@ -201,6 +204,7 @@ esac
                 ),
             )
             .env("REUSE_WORKTREE", reuse)
+            .env("TMUX_SESSIONS", sessions)
             .env("GIT_CONFIG_GLOBAL", "/dev/null")
             .env("GIT_CONFIG_NOSYSTEM", "1")
             .env_remove("TMUX")
@@ -211,7 +215,14 @@ esac
             .env_remove("GROVE_CONFIG")
             .output()
             .unwrap();
-        assert_eq!(self.text("count"), choices.len().to_string());
+        assert_eq!(
+            self.text("count"),
+            if choices.is_empty() {
+                String::new()
+            } else {
+                choices.len().to_string()
+            }
+        );
         output
     }
 
@@ -753,8 +764,10 @@ fn changed_checkout_is_rejected_after_checkout_and_layout_pickers() {
                     choices.push("0");
                 }
                 let output = fixture.run_mutating(
+                    &[],
                     &choices,
                     (!layout).then_some(path.as_path()),
+                    "",
                     false,
                     Some((choices.len(), path, mutation)),
                 );
@@ -783,6 +796,174 @@ fn changed_checkout_is_rejected_after_checkout_and_layout_pickers() {
 }
 
 #[test]
+fn explicit_path_uses_named_preset_without_a_picker() {
+    let fixture = Fixture::new();
+    fs::write(
+        fixture.dir.path().join("config/grove/config.toml"),
+        "roots = []\n[[presets]]\nname = 'custom'\n",
+    )
+    .unwrap();
+    let normal = fixture.normal.canonicalize().unwrap();
+    let output = fixture.run_mutating(
+        &["--path", normal.to_str().unwrap(), "--preset", "custom"],
+        &[],
+        None,
+        "",
+        false,
+        None,
+    );
+    assert!(output.status.success(), "{output:?}");
+    let log = fixture.text("tmux.log");
+    assert!(
+        log.contains(&format!("-s\0ordinary\0-c\0{}\0", normal.display())),
+        "{log}"
+    );
+    assert!(log.contains("attach-session\0-t\0$8\0"), "{log}");
+}
+
+#[test]
+fn explicit_linked_path_uses_linked_name_and_metadata() {
+    let fixture = Fixture::new();
+    let linked = fixture.linked.canonicalize().unwrap();
+    let output = fixture.run_mutating(
+        &["--path", linked.to_str().unwrap(), "--preset", "custom"],
+        &[],
+        None,
+        "",
+        false,
+        None,
+    );
+    assert!(output.status.success(), "{output:?}");
+    let log = fixture.text("tmux.log");
+    assert!(log.contains("-s\0repo/topic\0"), "{log}");
+    let worktree = linked
+        .to_string_lossy()
+        .as_bytes()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    assert!(
+        log.contains(&format!("@grove_worktree\0{worktree}\0")),
+        "{log}"
+    );
+}
+
+#[test]
+fn explicit_path_without_preset_selects_or_cancels_a_layout() {
+    let fixture = Fixture::new();
+    let path = fixture.normal.canonicalize().unwrap();
+    let output = fixture.run_mutating(
+        &["--path", path.to_str().unwrap()],
+        &["1"],
+        None,
+        "",
+        false,
+        None,
+    );
+    assert!(output.status.success(), "{output:?}");
+    assert!(fixture.text("picker-1.args").contains("layout> "));
+    assert!(fixture.text("tmux.log").contains("new-session"));
+
+    let output = fixture.run_mutating(
+        &["--path", path.to_str().unwrap()],
+        &["cancel"],
+        None,
+        "",
+        false,
+        None,
+    );
+    assert!(output.status.success(), "{output:?}");
+    assert!(!fixture.text("tmux.log").contains("new-session"));
+}
+
+#[test]
+fn explicit_path_errors_and_reuses_before_preset_lookup() {
+    let fixture = Fixture::new();
+    let path = fixture.normal.canonicalize().unwrap();
+    let output = fixture.run_mutating(
+        &["--path", path.to_str().unwrap(), "--preset", "missing"],
+        &[],
+        None,
+        "",
+        false,
+        None,
+    );
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("unknown preset \"missing\""));
+    assert!(fixture.text("tmux.log").contains("list-sessions"));
+    assert!(!fixture.text("tmux.log").contains("new-session"));
+
+    let output = fixture.run_mutating(
+        &["--path", path.to_str().unwrap(), "--preset", "missing"],
+        &[],
+        Some(&path),
+        "",
+        false,
+        None,
+    );
+    assert!(output.status.success(), "{output:?}");
+    assert!(
+        fixture
+            .text("tmux.log")
+            .contains("attach-session\0-t\0$7\0")
+    );
+    assert!(!fixture.dir.path().join("count").exists());
+}
+
+#[test]
+fn explicit_path_preserves_collision_and_rejects_invalid_paths() {
+    let fixture = Fixture::new();
+    let path = fixture.normal.canonicalize().unwrap();
+    let output = fixture.run_mutating(
+        &["--path", path.to_str().unwrap(), "--preset", "custom"],
+        &[],
+        None,
+        "$foreign:ordinary::::::0\n",
+        false,
+        None,
+    );
+    assert!(output.status.success(), "{output:?}");
+    let log = fixture.text("tmux.log");
+    assert!(log.contains("-s\0ordinary-"), "{log}");
+
+    for invalid in [
+        fixture.linked.parent().unwrap().parent().unwrap(),
+        fixture.dir.path(),
+    ] {
+        let output = fixture.run_mutating(
+            &["--path", invalid.to_str().unwrap(), "--preset", "custom"],
+            &[],
+            None,
+            "",
+            false,
+            None,
+        );
+        assert!(!output.status.success());
+        assert!(fixture.text("tmux.log").is_empty());
+    }
+}
+
+#[test]
+fn explicit_path_revalidates_after_layout_selection() {
+    let fixture = Fixture::new();
+    let path = fixture.normal.canonicalize().unwrap();
+    let output = fixture.run_mutating(
+        &["--path", path.to_str().unwrap()],
+        &["0"],
+        None,
+        "",
+        false,
+        Some((1, &path, "missing")),
+    );
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8_lossy(&output.stderr)
+            .contains("no longer the same non-bare Git worktree")
+    );
+    assert!(!fixture.text("tmux.log").contains("new-session"));
+}
+
+#[test]
 fn cancellation_after_checkout_disappears_remains_a_noop() {
     for choices in [
         &["cancel"][..],
@@ -796,8 +977,14 @@ fn cancellation_after_checkout_disappears_remains_a_noop() {
         } else {
             &fixture.normal
         };
-        let output =
-            fixture.run_mutating(choices, None, false, Some((choices.len(), path, "missing")));
+        let output = fixture.run_mutating(
+            &[],
+            choices,
+            None,
+            "",
+            false,
+            Some((choices.len(), path, "missing")),
+        );
         assert!(output.status.success(), "{output:?}");
         assert!(output.stderr.is_empty(), "{output:?}");
         let log = fixture.text("tmux.log");
