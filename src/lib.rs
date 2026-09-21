@@ -220,6 +220,15 @@ pub fn select_layout(config: &Config) -> Result<Option<Preset>> {
     }
 }
 
+fn select_preset(config: &Config, name: &str) -> Result<Preset> {
+    config
+        .presets
+        .iter()
+        .find(|preset| preset.name == name)
+        .cloned()
+        .with_context(|| format!("unknown preset {name:?}"))
+}
+
 fn session_for_worktree<'a>(sessions: &'a [Session], worktree: &Path) -> Option<&'a Session> {
     sessions
         .iter()
@@ -241,6 +250,36 @@ pub fn refresh(config: &Config, tmux: &Tmux, force: bool) -> Result<()> {
         tmux.create_default(&default.name, &default.cwd, &default.windows)?;
     }
     Ok(())
+}
+
+pub fn open_path(config: &Config, tmux: &Tmux, path: &Path, preset: Option<&str>) -> Result<()> {
+    let checkout = git::checkout(path)?;
+    open_checkout(config, tmux, &checkout, preset)
+}
+
+fn open_checkout(
+    config: &Config,
+    tmux: &Tmux,
+    checkout: &Checkout,
+    preset: Option<&str>,
+) -> Result<()> {
+    git::validate_checkout(checkout)?;
+    let sessions = tmux.sessions()?;
+    if let Some(existing) = session_for_worktree(&sessions, &checkout.worktree) {
+        return tmux.navigate(&existing.id);
+    }
+    let layout = match preset {
+        Some(name) => select_preset(config, name)?,
+        None => match select_layout(config)? {
+            Some(layout) => layout,
+            None => return Ok(()),
+        },
+    };
+    git::validate_checkout(checkout)?;
+    let occupied = sessions.iter().map(|s| s.name.clone()).collect();
+    let name = session_name(checkout, &occupied);
+    let id = tmux.create(&name, checkout, &layout)?;
+    tmux.navigate(&id)
 }
 
 pub fn open(config: &Config, tmux: &Tmux) -> Result<()> {
@@ -290,19 +329,7 @@ pub fn open(config: &Config, tmux: &Tmux) -> Result<()> {
                 .context("fzf selected an unknown worktree")?
         }
     };
-    git::validate_checkout(checkout)?;
-    let sessions = tmux.sessions()?;
-    if let Some(existing) = session_for_worktree(&sessions, &checkout.worktree) {
-        return tmux.navigate(&existing.id);
-    }
-    let Some(layout) = select_layout(config)? else {
-        return Ok(());
-    };
-    git::validate_checkout(checkout)?;
-    let occupied = sessions.iter().map(|s| s.name.clone()).collect();
-    let name = session_name(checkout, &occupied);
-    let id = tmux.create(&name, checkout, &layout)?;
-    tmux.navigate(&id)
+    open_checkout(config, tmux, checkout, None)
 }
 
 fn selectable_sessions(
@@ -386,6 +413,19 @@ mod tests {
         permissions.set_mode(0o755);
         fs::set_permissions(&path, permissions).unwrap();
         path
+    }
+
+    #[test]
+    fn named_preset_selection_is_exact() {
+        let config = Config {
+            presets: vec![Preset::shell()],
+            ..Config::default()
+        };
+        assert_eq!(select_preset(&config, "shell").unwrap().name, "shell");
+        assert_eq!(
+            select_preset(&config, "Shell").unwrap_err().to_string(),
+            "unknown preset \"Shell\""
+        );
     }
 
     #[test]
