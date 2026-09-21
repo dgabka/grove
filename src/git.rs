@@ -280,6 +280,25 @@ fn probe(path: &Path, cache: &mut HashMap<PathBuf, Option<Probe>>) -> Option<Pro
 }
 
 /// Picker waits can invalidate discovery metadata; never reuse a cached probe here.
+pub fn checkout(path: &Path) -> Result<Checkout> {
+    let path = canonical(path)?;
+    let info = probe(&path, &mut HashMap::new())
+        .with_context(|| format!("inspect Git checkout {}", path.display()))?;
+    if info.bare {
+        bail!("{} is a bare Git repository", path.display());
+    }
+    if info.top.as_ref() != Some(&path) {
+        bail!("{} is not a Git checkout top-level", path.display());
+    }
+    Ok(Checkout {
+        repo: info.common.to_string_lossy().into_owned(),
+        repo_name: display_name(&info.common),
+        worktree: path,
+        branch: branch(&info.git_dir),
+        linked: info.git_dir != info.common,
+    })
+}
+
 pub fn validate_checkout(checkout: &Checkout) -> Result<()> {
     if probe(&checkout.worktree, &mut HashMap::new()).is_some_and(|info| {
         !info.bare
@@ -530,6 +549,65 @@ mod tests {
         );
         assert_eq!(bare.columns(false), ["[bare]", "repo", "/tmp/repo.git", ""]);
     }
+    #[test]
+    fn explicit_checkout_accepts_normal_and_linked_worktrees() {
+        let d = TempDir::new().unwrap();
+        let repo = d.path().join("repo");
+        std::fs::create_dir(&repo).unwrap();
+        run(&repo, &["init", "-b", "main"]);
+        commit(&repo);
+        let linked = d.path().join("linked");
+        run(
+            &repo,
+            &["worktree", "add", "-b", "feature", linked.to_str().unwrap()],
+        );
+
+        let normal = checkout(&repo).unwrap();
+        assert_eq!(normal.worktree, repo.canonicalize().unwrap());
+        assert_eq!(normal.branch.as_deref(), Some("main"));
+        assert!(!normal.linked);
+
+        let worktree = checkout(&linked).unwrap();
+        assert_eq!(worktree.worktree, linked.canonicalize().unwrap());
+        assert_eq!(worktree.repo, normal.repo);
+        assert_eq!(worktree.branch.as_deref(), Some("feature"));
+        assert!(worktree.linked);
+    }
+
+    #[test]
+    fn explicit_checkout_rejects_invalid_paths() {
+        let d = TempDir::new().unwrap();
+        let repo = d.path().join("repo");
+        std::fs::create_dir(&repo).unwrap();
+        run(&repo, &["init"]);
+        let nested = repo.join("nested");
+        std::fs::create_dir(&nested).unwrap();
+        let bare = d.path().join("bare.git");
+        run(d.path(), &["init", "--bare", bare.to_str().unwrap()]);
+        let non_git = d.path().join("non-git");
+        std::fs::create_dir(&non_git).unwrap();
+
+        for path in [&nested, &bare, &non_git] {
+            assert!(checkout(path).is_err(), "{}", path.display());
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn explicit_checkout_canonicalizes_symlinks() {
+        let d = TempDir::new().unwrap();
+        let repo = d.path().join("repo");
+        std::fs::create_dir(&repo).unwrap();
+        run(&repo, &["init"]);
+        let link = d.path().join("link");
+        std::os::unix::fs::symlink(&repo, &link).unwrap();
+
+        assert_eq!(
+            checkout(&link).unwrap().worktree,
+            repo.canonicalize().unwrap()
+        );
+    }
+
     #[test]
     fn normal_discovery_does_not_expand_external_worktrees() {
         let d = TempDir::new().unwrap();
