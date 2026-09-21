@@ -54,7 +54,7 @@ Cancelling a picker exits successfully without changing sessions.
 
 A nonempty `GROVE_CONFIG` is authoritative. Otherwise Grove selects `$XDG_CONFIG_HOME/grove/config.toml` when `XDG_CONFIG_HOME` is set, `~/.config/grove/config.toml` when `HOME` is set, or `./grove/config.toml` otherwise. Read or parse failures do not fall back. See [`example-config.toml`](example-config.toml) for the complete shape.
 
-`grove` and `grove refresh` fail if the selected config file is missing; `grove switch` and `grove close` can run without one. Empty `roots` blocks repository opening, but configured defaults can still be refreshed.
+`grove` and `grove refresh` fail if the selected config file is missing; `grove switch` and `grove close` can run without one. Empty `roots` blocks only interactive discovery with plain `grove`; explicit `grove --path` opening and configured-default refresh remain supported.
 
 - `roots` lists absolute repository roots. `max_depth` limits discovery depth and defaults to `3`.
 - `nerd_fonts` controls glyph labels and defaults to `true`; set it to `false` for plain-text labels.
