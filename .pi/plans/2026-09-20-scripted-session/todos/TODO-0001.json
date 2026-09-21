@@ -1,0 +1,11 @@
+{
+  "id": "TODO-0001",
+  "title": "Resolve an explicit path into a canonical checkout",
+  "body": "Plan: `.pi/plans/2026-09-20-scripted-session/plan.md`\n\nModify: `src/git.rs`\n\nImplement a focused public function that resolves an explicitly supplied absolute checkout-root path into the existing `Checkout` type. Reuse the existing private `canonical`, `probe`, `display_name`, and `branch` helpers. Accept normal checkouts, linked worktrees, and symlinks that canonicalize to a checkout root. Reject missing/non-Git paths, bare repositories, and checkout subdirectories with contextual `anyhow` errors. Derive common repository identity and linked classification from Git output; do not scan roots, enumerate worktrees, or infer ownership from path layout.\n\nExpected shape:\n```rust\npub fn checkout(path: &Path) -> Result<Checkout> {\n    let path = canonical(path)?;\n    let info = probe(&path, &mut HashMap::new())\n        .with_context(|| format!(\"inspect Git checkout {}\", path.display()))?;\n    // Require !info.bare and info.top.as_ref() == Some(&path), then build Checkout.\n}\n```\nAdapt names/error text to existing conventions; do not expose `Probe`.\n\nReference: `src/git.rs:246-300` \u2014 existing Git probe and authoritative `validate_checkout` identity checks. Reference: `src/git.rs:410-449` \u2014 construction of linked `Checkout` values from probe facts.\n\nAdd unit tests in `src/git.rs` using temporary Git repositories for normal checkout, linked worktree, bare repository, subdirectory, non-Git path, and symlink canonicalization. Follow the existing test helpers around `src/git.rs:451-490` and keep Git subprocesses argv-based.\n\nAcceptance: ISC-1, ISC-2, ISC-9, ISC-10, and ISC-11 are covered at the Git boundary; `cargo test git::tests` passes.\n\nDependencies: none.",
+  "tags": [
+    "scripted-session"
+  ],
+  "status": "closed",
+  "createdAt": "2026-09-21T06:48:43.242Z",
+  "updatedAt": "2026-09-21T06:50:21Z"
+}

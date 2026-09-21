@@ -1,0 +1,11 @@
+{
+  "id": "TODO-0005",
+  "title": "Document explicit checkout opening",
+  "body": "Plan: `.pi/plans/2026-09-20-scripted-session/plan.md`\n\nModify: `README.md`\n\nDocument `grove --path /absolute/checkout [--preset NAME]` concisely in the existing Commands/Repository sections. State that path is required for preset mode, must identify an absolute non-bare checkout root, may be a linked worktree or a checkout outside configured roots, and that omitting preset opens the normal layout picker. Explain that preset names are exact configured names and that existing matching sessions are reused before layout selection. Do not add a new documentation file or alter `example-config.toml`.\n\nSuggested command example:\n```sh\ngrove --path /Users/you/repos/project --preset editor\n```\n\nReference: `README.md:30-39` — current command summaries. Reference: `README.md:71-80` — repository/session semantics and cancellation behavior. Match the existing compact prose style.\n\nAcceptance: README describes ISC-1 through ISC-5, ISC-8, ISC-9, ISC-11, ISC-12, and ISC-A-2 without implying worktree management or bare-repository expansion.\n\nDependencies: TODO-0003 so documentation matches final CLI help/behavior.",
+  "tags": [
+    "scripted-session"
+  ],
+  "status": "closed",
+  "createdAt": "2026-09-21T06:49:34.717Z",
+  "updatedAt": "2026-09-21T07:10:00.000Z"
+}

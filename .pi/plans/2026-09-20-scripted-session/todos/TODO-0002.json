@@ -1,0 +1,11 @@
+{
+  "id": "TODO-0002",
+  "title": "Share checkout opening and support named preset selection",
+  "body": "Plan: `.pi/plans/2026-09-20-scripted-session/plan.md`\n\nModify: `src/lib.rs`\n\nExtract the current post-selection tail of `open` into one private helper. It must preserve this order: validate checkout; list sessions; navigate immediately on canonical worktree metadata reuse; resolve layout; validate again; call existing `session_name`; call existing `Tmux::create`; navigate. The helper accepts an optional preset name: `None` uses `select_layout`; `Some(name)` performs exact lookup in `config.presets` and never invokes fzf. Return a clear `anyhow` error for an unknown preset only when creation is needed.\n\nAdd a public explicit-path entry point that calls the Git resolver from TODO-0001 and then the shared helper. Do not check `config.roots`, add request/config abstractions, change tmux metadata, or alter plain discovery.\n\nExpected shape:\n```rust\npub fn open_path(config: &Config, tmux: &Tmux, path: &Path, preset: Option<&str>) -> Result<()> {\n    let checkout = git::checkout(path)?;\n    open_checkout(config, tmux, &checkout, preset)\n}\n\nfn open_checkout(\n    config: &Config,\n    tmux: &Tmux,\n    checkout: &Checkout,\n    preset: Option<&str>,\n) -> Result<()> {\n    // validation -> reuse -> preset/picker -> validation -> create -> navigate\n}\n```\n\nReference: `src/lib.rs:235-306` \u2014 existing `open` selection and post-selection behavior. Reference: `src/lib.rs:196-218` \u2014 existing picker-based layout selection. Reference: `src/lib.rs:220-225` \u2014 metadata-based session lookup.\n\nAdd focused unit coverage where practical for exact preset lookup/error while keeping end-to-end picker/tmux assertions for the integration ticket. Preserve all existing tests.\n\nAcceptance: ISC-3, ISC-4, ISC-5, ISC-6, ISC-7, ISC-12, ISC-A-1, and ISC-A-2 are represented in the shared control flow; `cargo test --lib` passes.\n\nDependencies: TODO-0001.",
+  "tags": [
+    "scripted-session"
+  ],
+  "status": "closed",
+  "createdAt": "2026-09-21T06:48:58.796Z",
+  "updatedAt": "2026-09-21T07:00:00Z"
+}

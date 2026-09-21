@@ -1,0 +1,11 @@
+{
+  "id": "TODO-0003",
+  "title": "Add top-level path and preset CLI arguments",
+  "body": "Plan: `.pi/plans/2026-09-20-scripted-session/plan.md`\n\nModify: `src/main.rs`\n\nAdd optional top-level `--path <PATH>` and `--preset <NAME>` arguments. Parse path as `PathBuf` with a small Clap value parser that rejects non-absolute values. Declare `--preset` as requiring `--path`. Ensure opening flags conflict with `switch`, `close`, and `refresh` rather than being silently ignored. Dispatch `--path` mode to `grove::open_path`; keep plain `grove` and all existing subcommands unchanged. Config remains authoritative and loads for both opening modes.\n\nExpected shape:\n```rust\n#[derive(Parser)]\n#[command(version, about = \"tmux sessions for Git worktrees\", args_conflicts_with_subcommands = true)]\nstruct Cli {\n    #[arg(long, value_parser = absolute_path)]\n    path: Option<PathBuf>,\n    #[arg(long, requires = \"path\")]\n    preset: Option<String>,\n    #[command(subcommand)]\n    command: Option<Command>,\n}\n```\nThe exact Clap annotations may differ if tests demonstrate equivalent behavior; do not add a subcommand or dependency.\n\nReference: `src/main.rs:4-33` \u2014 current Clap structure and dispatch. Reference: `src/main.rs:35-68` \u2014 parser-test style using `Cli::try_parse_from`.\n\nExtend parser tests for: absolute path alone; absolute path plus preset; preset without path; relative path; and opening flags mixed with each existing subcommand.\n\nAcceptance: ISC-8 and ISC-9 pass as argument-parse checks; plain/subcommand behavior remains intact; `cargo test --bin grove` passes.\n\nDependencies: TODO-0002.",
+  "tags": [
+    "scripted-session"
+  ],
+  "status": "closed",
+  "createdAt": "2026-09-21T06:49:10.708Z",
+  "updatedAt": "2026-09-21T07:00:00Z"
+}

@@ -1,0 +1,12 @@
+{
+  "id": "TODO-0006",
+  "title": "Clarify empty roots behavior for explicit paths",
+  "body": "Fix README so empty roots are documented as blocking only interactive discovery/plain `grove`; explicit `grove --path` remains supported. Commit the concise docs correction and close this todo.",
+  "tags": [
+    "scripted-session",
+    "review"
+  ],
+  "status": "closed",
+  "createdAt": "2026-09-21T07:11:48.031Z",
+  "updatedAt": "2026-09-21T07:12:55.058Z"
+}
