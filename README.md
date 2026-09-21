@@ -43,6 +43,7 @@ Use `grove --help` for commands and `grove --version` for the installed version.
 ## Commands
 
 - `grove` — select a checkout directly, or select a bare repository and then one of its active linked worktrees. Reuse its Grove session, or select a layout and create one.
+- `grove --path /absolute/checkout [--preset NAME]` — open an explicit checkout without discovery. The path must be an absolute non-bare checkout root; linked worktrees and checkouts outside configured `roots` are accepted. `--preset` requires `--path` and names an exact configured preset, skipping the layout picker. Without it, Grove opens the normal layout picker; cancellation is a no-op. Matching existing sessions are reused before preset or layout selection.
 - `grove switch [--repo]` — select another running tmux session. `--repo` prefers Grove sessions with the current session's repository metadata, then falls back to all other sessions.
 - `grove close [--repo]` — must run inside tmux. Select another session, switch to it, then remove the old session only after navigation succeeds. `--repo` uses the same preference as `switch`; cancellation, no alternatives, or failed navigation preserves the old session.
 - `grove refresh [--force]` — create missing configured default sessions on demand; it does not supervise them. **`--force` destructively kills every same-named session, including current or unrelated sessions, before replacement. A failed replacement cannot restore the old session.**
