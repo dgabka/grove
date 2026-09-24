@@ -1,4 +1,7 @@
 roots = ["/Users/you/repos"]
+# Optional generic directory targets. Each path must be absolute and an existing directory.
+# Grove canonicalizes paths and rejects duplicate canonical directories.
+bookmarks = ["/Users/you/notes", "/Users/you/scratch"]
 max_depth = 3
 # Use Nerd Font branch/tree markers for bare repositories and branch glyphs for linked worktrees.
 nerd_fonts = true

@@ -20,10 +20,11 @@ Nix flake consumers can use `grove.packages.${pkgs.system}.default` directly.
 
 ## Quick start
 
-Create the selected config file with one absolute repository root. By default this is `~/.config/grove/config.toml`, unless `$XDG_CONFIG_HOME` is set:
+Create the selected config file with an absolute repository root, bookmark directory, or both. By default this is `~/.config/grove/config.toml`, unless `$XDG_CONFIG_HOME` is set:
 
 ```toml
 roots = ["/home/you/repos"]
+bookmarks = ["/home/you/notes"]
 ```
 
 Replace the example path with your repository directory, then run:
@@ -42,8 +43,8 @@ Use `grove --help` for commands and `grove --version` for the installed version.
 
 ## Commands
 
-- `grove` — select a checkout directly, or select a bare repository and then one of its active linked worktrees. Reuse its Grove session, or select a layout and create one.
-- `grove --path /absolute/checkout [--preset NAME]` — open an explicit checkout without discovery. The path must be an absolute non-bare checkout root; linked worktrees and checkouts outside configured `roots` are accepted. `--preset` requires `--path` and names an exact configured preset, skipping the layout picker. Without it, Grove opens the normal layout picker; cancellation is a no-op. Matching existing sessions are reused before preset or layout selection.
+- `grove` — select a bookmark or checkout directly, or select a bare repository and then one of its active linked worktrees. Reuse its Grove session, or select a layout and create one.
+- `grove --path /absolute/checkout [--preset NAME]` — open an explicit Git checkout without discovery; bookmarks are configured only. The path must be an absolute non-bare checkout root; linked worktrees and checkouts outside configured `roots` are accepted. `--preset` requires `--path` and names an exact configured preset, skipping the layout picker. Without it, Grove opens the normal layout picker; cancellation is a no-op. Matching existing sessions are reused before preset or layout selection.
 - `grove switch [--repo]` — select another running tmux session. `--repo` prefers Grove sessions with the current session's repository metadata, then falls back to all other sessions.
 - `grove close [--repo]` — must run inside tmux. Select another session, switch to it, then remove the old session only after navigation succeeds. `--repo` uses the same preference as `switch`; cancellation, no alternatives, or failed navigation preserves the old session.
 - `grove refresh [--force]` — create missing configured default sessions on demand; it does not supervise them. **`--force` destructively kills every same-named session, including current or unrelated sessions, before replacement. A failed replacement cannot restore the old session.**
@@ -54,9 +55,10 @@ Cancelling a picker exits successfully without changing sessions.
 
 A nonempty `GROVE_CONFIG` is authoritative. Otherwise Grove selects `$XDG_CONFIG_HOME/grove/config.toml` when `XDG_CONFIG_HOME` is set, `~/.config/grove/config.toml` when `HOME` is set, or `./grove/config.toml` otherwise. Read or parse failures do not fall back. See [`example-config.toml`](example-config.toml) for the complete shape.
 
-`grove` and `grove refresh` fail if the selected config file is missing; `grove switch` and `grove close` can run without one. Empty `roots` blocks only interactive discovery with plain `grove`; explicit `grove --path` opening and configured-default refresh remain supported.
+`grove` and `grove refresh` fail if the selected config file is missing; `grove switch` and `grove close` can run without one. Plain `grove` requires at least one root or bookmark; explicit Git-only `grove --path` opening and configured-default refresh remain supported without either.
 
-- `roots` lists absolute repository roots. `max_depth` limits discovery depth and defaults to `3`.
+- `roots` lists absolute repository roots. `bookmarks` lists absolute, existing directories. Bookmark paths are canonicalized when configuration loads, so symlink spellings display as their targets and duplicate canonical paths are rejected. A bookmark remains a generic directory target even if it is or later becomes a Git checkout. `max_depth` limits repository discovery depth and defaults to `3`.
+- Bookmarks are listed before discovered repositories, in configuration order. They open the layout picker directly; they do not expand Git worktrees.
 - `nerd_fonts` controls glyph labels and defaults to `true`; set it to `false` for plain-text labels.
 - `[[presets]]` names layouts offered after selecting a checkout. `[[defaults]]` names sessions that `grove refresh` creates, each with an absolute, existing `cwd`.
 - Presets and defaults contain named `windows`, which contain `panes`. Omitting windows creates a shell window; omitting panes creates a shell pane.
@@ -77,11 +79,11 @@ Pane commands are literal argv arrays, not shell strings; their executables (suc
 
 ## Repository and sessions
 
-The first picker lists direct checkouts and bare repositories. Selecting a checkout continues directly to layout selection. Selecting a bare repository opens a second picker for its active linked worktrees; Grove enumerates worktrees only for that selected bare repository. If it has no eligible worktrees, Grove reports this and stops without selecting a layout or creating a session.
+The first picker lists bookmarks first, then direct checkouts and bare repositories. Selecting a bookmark or checkout continues directly to layout selection. Selecting a bare repository opens a second picker for its active linked worktrees; Grove enumerates worktrees only for that selected bare repository. If it has no eligible worktrees, Grove reports this and stops without selecting a layout or creating a session.
 
-Grove reuses a session by the canonical checkout identity stored in tmux metadata, not by its name, so independent sessions remain separate. Main checkout sessions are named `repository`; linked worktree sessions are named `repository/worktree`. Names stay stable across branch changes and preserve spaces and Unicode; tmux-invalid colons, periods, and control characters become `-`. If the base name is occupied, Grove preserves that session and adds a stable hash suffix to the new name.
+Grove reuses checkout and bookmark sessions by their canonical directory identity and target kind stored in tmux metadata, not by name, so independent sessions remain separate. A bookmark never reuses a checkout session at the same directory. Main checkout sessions are named `repository`; linked worktree sessions are named `repository/worktree`; bookmark sessions use their directory basename. Names stay stable across branch changes and preserve spaces and Unicode; tmux-invalid colons, periods, and control characters become `-`. If the base name is occupied, Grove preserves that session and adds a stable hash suffix to the new name.
 
-Nerd Font glyphs are optional presentation only: set `nerd_fonts = false` for plain-text repository, branch, and bare-repository labels.
+Bookmark sessions appear in normal `switch` and `close` pickers. With `--repo`, bookmarks have no repository metadata and remain fallback choices. Nerd Font glyphs are optional presentation only: set `nerd_fonts = false` for plain-text repository, branch, bare-repository, and `[bookmark]` labels.
 
 ## tmux popup bindings
 
