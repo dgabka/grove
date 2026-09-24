@@ -296,6 +296,10 @@ fn open_target(config: &Config, tmux: &Tmux, target: Target, preset: Option<&str
         },
     };
     target.validate()?;
+    let sessions = tmux.sessions()?;
+    if let Some(existing) = session_for_target(&sessions, &target) {
+        return tmux.navigate(&existing.id);
+    }
     let occupied = sessions.iter().map(|s| s.name.clone()).collect();
     let name = session_name(&target, &occupied);
     let id = tmux.create(&name, &target, &layout)?;
