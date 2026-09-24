@@ -255,7 +255,7 @@ fn session_for_target<'a>(sessions: &'a [Session], target: &Target) -> Option<&'
     sessions.iter().find(|session| {
         session.worktree.as_deref() == Some(target.cwd().to_string_lossy().as_ref())
             && match target {
-                Target::Checkout(_) => session.kind.as_deref() != Some("bookmark"),
+                Target::Checkout(_) => matches!(session.kind.as_deref(), None | Some("checkout")),
                 Target::Bookmark(_) => session.kind.as_deref() == Some("bookmark"),
             }
     })
@@ -935,6 +935,24 @@ mod tests {
             .id,
             "$1"
         );
+
+        let checkout = Target::Checkout(Checkout {
+            repo: "repo-a".into(),
+            worktree: PathBuf::from("/tmp/a"),
+            repo_name: "a".into(),
+            branch: None,
+            linked: false,
+        });
+        let mut checkout_session = sessions[0].clone();
+        checkout_session.kind = Some("checkout".into());
+        assert_eq!(
+            session_for_target(&[checkout_session.clone()], &checkout)
+                .unwrap()
+                .id,
+            "$1"
+        );
+        checkout_session.kind = Some("other".into());
+        assert!(session_for_target(&[checkout_session], &checkout).is_none());
 
         let bookmark = Target::Bookmark(PathBuf::from("/tmp/a"));
         assert!(session_for_target(&sessions, &bookmark).is_none());

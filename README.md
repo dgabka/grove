@@ -20,14 +20,15 @@ Nix flake consumers can use `grove.packages.${pkgs.system}.default` directly.
 
 ## Quick start
 
-Create the selected config file with an absolute repository root, bookmark directory, or both. By default this is `~/.config/grove/config.toml`, unless `$XDG_CONFIG_HOME` is set:
+Create the selected config file with an absolute repository root. By default this is `~/.config/grove/config.toml`, unless `$XDG_CONFIG_HOME` is set:
 
 ```toml
 roots = ["/home/you/repos"]
-bookmarks = ["/home/you/notes"]
+# Optional generic directory targets:
+# bookmarks = ["/home/you/notes"]
 ```
 
-Replace the example path with your repository directory, then run:
+Replace the repository path. Uncomment and replace `bookmarks` only if you want directory targets, then run:
 
 ```sh
 grove

@@ -255,6 +255,7 @@ impl Tmux {
             ("@grove_label", target.base_label()),
             ("@grove_name", target.display_name()),
         ];
+        metadata.push(("@grove_kind", target.kind().into()));
         match target {
             Target::Checkout(checkout) => {
                 metadata.insert(0, ("@grove_repo", checkout.repo.clone()));
@@ -265,7 +266,7 @@ impl Tmux {
                     ));
                 }
             }
-            Target::Bookmark(_) => metadata.push(("@grove_kind", "bookmark".into())),
+            Target::Bookmark(_) => {}
         }
         self.create_layout(name, &cwd, &preset.windows, &metadata)
     }
@@ -492,6 +493,7 @@ mod tests {
         assert_eq!(sessions[0].label(true), checkout.label(true));
         assert_eq!(sessions[0].label(false), checkout.label(false));
         assert_eq!(sessions[0].branch.as_deref(), Some("main"));
+        assert_eq!(sessions[0].kind.as_deref(), Some("checkout"));
         assert_eq!(
             sessions[0].name_meta.as_deref(),
             Some(checkout.display_name().as_str())
