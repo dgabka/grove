@@ -777,7 +777,7 @@ fn bookmarks_precede_repositories_and_open_as_independent_targets() {
         log.contains(&format!("-c\0{}\0", second.display())),
         "{log}"
     );
-    assert!(log.contains("@grove_kind\0626f6f6b6d61726b\0"), "{log}");
+    assert!(log.contains("@grove_kind\x00626f6f6b6d61726b\0"), "{log}");
     assert!(!log.contains("worktree> "), "{log}");
 
     let sessions = "$old:notes 界::::::0\n".to_owned();
