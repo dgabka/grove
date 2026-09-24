@@ -7,6 +7,8 @@ use std::{collections::HashSet, path::PathBuf};
 pub struct Config {
     #[serde(default)]
     pub roots: Vec<PathBuf>,
+    #[serde(default)]
+    pub bookmarks: Vec<PathBuf>,
     #[serde(default = "default_depth")]
     pub max_depth: usize,
     #[serde(default = "default_nerd_fonts")]
@@ -26,6 +28,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             roots: vec![],
+            bookmarks: vec![],
             max_depth: default_depth(),
             nerd_fonts: default_nerd_fonts(),
             presets: vec![],
@@ -116,9 +119,21 @@ fn optional_nerd_fonts_from(path: &std::path::Path) -> Result<bool> {
     Ok(config.nerd_fonts)
 }
 
-fn validate(config: Config) -> Result<Config> {
+fn validate(mut config: Config) -> Result<Config> {
     if config.roots.iter().any(|root| !root.is_absolute()) {
         bail!("configuration roots must be absolute paths");
+    }
+    let mut bookmark_paths = HashSet::new();
+    for bookmark in &mut config.bookmarks {
+        if !bookmark.is_absolute() || !bookmark.is_dir() {
+            bail!("bookmarks must be absolute existing directories");
+        }
+        *bookmark = bookmark
+            .canonicalize()
+            .with_context(|| format!("canonicalize bookmark {}", bookmark.display()))?;
+        if !bookmark_paths.insert(bookmark.clone()) {
+            bail!("bookmarks must be unique after canonicalization");
+        }
     }
     if config.max_depth == 0 {
         bail!("max_depth must be at least 1");
@@ -188,6 +203,46 @@ mod tests {
         assert!(optional_nerd_fonts_from(&path).unwrap());
         std::fs::write(&path, "nerd_fonts = false").unwrap();
         assert!(!optional_nerd_fonts_from(&path).unwrap());
+    }
+
+    #[test]
+    fn bookmarks_default_to_empty_and_remain_strict() {
+        let config: Config = toml::from_str("roots=['/x']").unwrap();
+        assert!(config.bookmarks.is_empty());
+        assert!(Config::default().bookmarks.is_empty());
+        assert!(toml::from_str::<Config>("bookmarks=[]\nextra=1").is_err());
+    }
+
+    #[test]
+    fn validates_and_canonicalizes_bookmarks() {
+        let directory = tempfile::TempDir::new().unwrap();
+        let bookmark = directory.path().join("bookmark");
+        std::fs::create_dir(&bookmark).unwrap();
+        let alias = directory.path().join("alias");
+        std::os::unix::fs::symlink(&bookmark, &alias).unwrap();
+
+        let config = format!("bookmarks = [{alias:?}]");
+        let config = validate(toml::from_str(&config).unwrap()).unwrap();
+        assert_eq!(config.bookmarks, vec![bookmark.canonicalize().unwrap()]);
+
+        for path in [
+            PathBuf::from("relative"),
+            directory.path().join("missing"),
+            {
+                let file = directory.path().join("file");
+                std::fs::write(&file, "").unwrap();
+                file
+            },
+        ] {
+            let config = format!("bookmarks = [{path:?}]");
+            assert!(
+                validate(toml::from_str(&config).unwrap()).is_err(),
+                "{path:?}"
+            );
+        }
+
+        let duplicate = format!("bookmarks = [{bookmark:?}, {alias:?}]");
+        assert!(validate(toml::from_str(&duplicate).unwrap()).is_err());
     }
 
     #[test]
