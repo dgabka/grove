@@ -343,7 +343,10 @@ fn custom_config_path_overrides_standard_and_empty_value_falls_back() {
         .unwrap();
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("no search roots configured"), "{stderr}");
+    assert!(
+        stderr.contains("no discovery sources configured"),
+        "{stderr}"
+    );
     assert!(
         stderr.contains(&alternate.display().to_string()),
         "{stderr}"
@@ -444,7 +447,7 @@ fn refresh_stops_at_first_creation_error_and_preserves_literal_argv() {
 }
 
 #[test]
-fn defaults_only_refresh_succeeds_but_open_requires_roots() {
+fn defaults_only_refresh_succeeds_but_open_requires_discovery_sources() {
     let fixture = Fixture::new();
     let cwd = fixture.dir.path();
     assert!(
@@ -463,7 +466,7 @@ fn defaults_only_refresh_succeeds_but_open_requires_roots() {
     .unwrap();
     let output = fixture.run_session(&[], &[], "", "", "", None);
     assert!(!output.status.success());
-    assert!(String::from_utf8_lossy(&output.stderr).contains("no search roots configured"));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("no discovery sources configured"));
     assert!(fixture.text("tmux.log").is_empty());
 }
 

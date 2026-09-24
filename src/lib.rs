@@ -5,7 +5,7 @@ pub mod tmux;
 
 use anyhow::{Context, Result, bail};
 use config::{Config, Preset};
-use git::{Checkout, Repository, discover};
+use git::{Repository, discover};
 use std::{
     collections::HashSet,
     io::Write,
@@ -20,6 +20,20 @@ fn branch_label(branch: Option<&str>, nerd_fonts: bool) -> String {
     branch.map_or_else(String::new, |branch| {
         format!("{} {branch}", if nerd_fonts { "" } else { "branch:" })
     })
+}
+
+enum PickerEntry {
+    Bookmark(PathBuf),
+    Repository(Repository),
+}
+
+impl PickerEntry {
+    fn columns(&self, nerd_fonts: bool) -> [String; 4] {
+        match self {
+            Self::Bookmark(path) => Target::Bookmark(path.clone()).columns(nerd_fonts),
+            Self::Repository(repository) => repository.columns(nerd_fonts),
+        }
+    }
 }
 
 fn home_paths(home: Option<&Path>) -> Vec<PathBuf> {
@@ -265,19 +279,12 @@ pub fn refresh(config: &Config, tmux: &Tmux, force: bool) -> Result<()> {
 }
 
 pub fn open_path(config: &Config, tmux: &Tmux, path: &Path, preset: Option<&str>) -> Result<()> {
-    let checkout = git::checkout(path)?;
-    open_checkout(config, tmux, &checkout, preset)
+    open_target(config, tmux, Target::Checkout(git::checkout(path)?), preset)
 }
 
-fn open_checkout(
-    config: &Config,
-    tmux: &Tmux,
-    checkout: &Checkout,
-    preset: Option<&str>,
-) -> Result<()> {
-    git::validate_checkout(checkout)?;
+fn open_target(config: &Config, tmux: &Tmux, target: Target, preset: Option<&str>) -> Result<()> {
+    target.validate()?;
     let sessions = tmux.sessions()?;
-    let target = Target::Checkout(checkout.clone());
     if let Some(existing) = session_for_target(&sessions, &target) {
         return tmux.navigate(&existing.id);
     }
@@ -288,7 +295,7 @@ fn open_checkout(
             None => return Ok(()),
         },
     };
-    git::validate_checkout(checkout)?;
+    target.validate()?;
     let occupied = sessions.iter().map(|s| s.name.clone()).collect();
     let name = session_name(&target, &occupied);
     let id = tmux.create(&name, &target, &layout)?;
@@ -296,35 +303,40 @@ fn open_checkout(
 }
 
 pub fn open(config: &Config, tmux: &Tmux) -> Result<()> {
-    if config.roots.is_empty() {
+    if config.roots.is_empty() && config.bookmarks.is_empty() {
         bail!(
-            "no search roots configured; configure search roots in {}",
+            "no discovery sources configured; configure search roots or bookmarks in {}",
             config::config_path().display()
         );
     }
     let repositories = discover(&config.roots, config.max_depth)?;
-    if repositories.is_empty() {
+    let mut entries: Vec<_> = config
+        .bookmarks
+        .iter()
+        .cloned()
+        .map(PickerEntry::Bookmark)
+        .collect();
+    entries.extend(repositories.into_iter().map(PickerEntry::Repository));
+    if entries.is_empty() {
         bail!(
-            "no Git repositories found; configure search roots in {}",
+            "no repositories or bookmarks available; configure search roots or bookmarks in {}",
             config::config_path().display()
         );
     }
-    let choices = aligned_choices(
-        repositories
-            .iter()
-            .map(|entry| entry.columns(config.nerd_fonts)),
-    );
+    let choices = aligned_choices(entries.iter().map(|entry| entry.columns(config.nerd_fonts)));
     let Some(id) = choose(&choices, "repository> ")? else {
         return Ok(());
     };
-    let repository = repositories
+    let entry = entries
         .get(id.parse::<usize>()?)
-        .context("fzf selected an unknown repository")?;
-    let checkouts;
-    let checkout = match repository {
-        Repository::Checkout(checkout) => checkout,
-        Repository::Bare(bare) => {
-            checkouts = git::worktrees(bare)?;
+        .context("fzf selected an unknown repository or bookmark")?;
+    let target = match entry {
+        PickerEntry::Bookmark(path) => Target::Bookmark(path.clone()),
+        PickerEntry::Repository(Repository::Checkout(checkout)) => {
+            Target::Checkout(checkout.clone())
+        }
+        PickerEntry::Repository(Repository::Bare(bare)) => {
+            let checkouts = git::worktrees(bare)?;
             if checkouts.is_empty() {
                 eprintln!("no active worktrees in {}", bare.path.display());
                 return Ok(());
@@ -337,12 +349,15 @@ pub fn open(config: &Config, tmux: &Tmux) -> Result<()> {
             let Some(id) = choose(&choices, "worktree> ")? else {
                 return Ok(());
             };
-            checkouts
-                .get(id.parse::<usize>()?)
-                .context("fzf selected an unknown worktree")?
+            Target::Checkout(
+                checkouts
+                    .get(id.parse::<usize>()?)
+                    .context("fzf selected an unknown worktree")?
+                    .clone(),
+            )
         }
     };
-    open_checkout(config, tmux, checkout, None)
+    open_target(config, tmux, target, None)
 }
 
 fn selectable_sessions(
@@ -413,6 +428,7 @@ pub fn close(tmux: &Tmux, repo_only: bool) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::git::Checkout;
     use std::{
         fs,
         os::unix::fs::PermissionsExt,
@@ -500,6 +516,26 @@ mod tests {
                 choices[3].1[..choices[3].1.find(branch).unwrap()].width()
             );
         }
+    }
+
+    #[test]
+    fn bookmark_picker_entries_precede_repositories() {
+        let entries = [
+            PickerEntry::Bookmark(PathBuf::from("/tmp/notes")),
+            PickerEntry::Repository(Repository::Checkout(Checkout {
+                repo: "/tmp/repo/.git".into(),
+                worktree: "/tmp/repo".into(),
+                repo_name: "repo".into(),
+                branch: None,
+                linked: false,
+            })),
+        ];
+        let choices = aligned_choices(entries.iter().map(|entry| entry.columns(false)));
+        assert_eq!(choices[0].0, "0");
+        assert!(choices[0].1.contains("[bookmark]"));
+        assert!(choices[0].1.contains("notes"));
+        assert_eq!(choices[1].0, "1");
+        assert!(choices[1].1.contains("repo"));
     }
 
     #[test]
