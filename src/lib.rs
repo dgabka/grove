@@ -151,7 +151,7 @@ fn choose_with(
     Ok(Some(id.to_owned()))
 }
 
-pub fn session_name(checkout: &Checkout, occupied: &HashSet<String>) -> String {
+pub fn session_name(target: &Target, occupied: &HashSet<String>) -> String {
     use sha2::{Digest, Sha256};
     let clean = |value: &str, fallback: &str| -> String {
         if value.is_empty() {
@@ -168,23 +168,29 @@ pub fn session_name(checkout: &Checkout, occupied: &HashSet<String>) -> String {
             })
             .collect()
     };
-    let mut name = clean(&checkout.repo_name, "repo");
-    if checkout.linked {
-        name.push('/');
-        name.push_str(&clean(
-            checkout
-                .worktree
-                .file_name()
-                .and_then(|s| s.to_str())
-                .unwrap_or(""),
-            "worktree",
-        ));
-    }
+    let mut name = match target {
+        Target::Checkout(checkout) => {
+            let mut name = clean(&checkout.repo_name, "repo");
+            if checkout.linked {
+                name.push('/');
+                name.push_str(&clean(
+                    checkout
+                        .worktree
+                        .file_name()
+                        .and_then(|name| name.to_str())
+                        .unwrap_or(""),
+                    "worktree",
+                ));
+            }
+            name
+        }
+        Target::Bookmark(_) => clean(&target.display_name(), "bookmark"),
+    };
     if !occupied.contains(&name) {
         return name;
     }
     let mut hash = Sha256::new();
-    hash.update(checkout.worktree.to_string_lossy().as_bytes());
+    hash.update(target.cwd().to_string_lossy().as_bytes());
     let stem = format!("{name}-{}", &format!("{:x}", hash.finalize())[..10]);
     name = stem.clone();
     let mut n = 2;
@@ -231,10 +237,14 @@ fn select_preset(config: &Config, name: &str) -> Result<Preset> {
         .with_context(|| format!("unknown preset {name:?}"))
 }
 
-fn session_for_worktree<'a>(sessions: &'a [Session], worktree: &Path) -> Option<&'a Session> {
-    sessions
-        .iter()
-        .find(|session| session.worktree.as_deref() == Some(worktree.to_string_lossy().as_ref()))
+fn session_for_target<'a>(sessions: &'a [Session], target: &Target) -> Option<&'a Session> {
+    sessions.iter().find(|session| {
+        session.worktree.as_deref() == Some(target.cwd().to_string_lossy().as_ref())
+            && match target {
+                Target::Checkout(_) => session.kind.as_deref() != Some("bookmark"),
+                Target::Bookmark(_) => session.kind.as_deref() == Some("bookmark"),
+            }
+    })
 }
 
 pub fn refresh(config: &Config, tmux: &Tmux, force: bool) -> Result<()> {
@@ -267,7 +277,8 @@ fn open_checkout(
 ) -> Result<()> {
     git::validate_checkout(checkout)?;
     let sessions = tmux.sessions()?;
-    if let Some(existing) = session_for_worktree(&sessions, &checkout.worktree) {
+    let target = Target::Checkout(checkout.clone());
+    if let Some(existing) = session_for_target(&sessions, &target) {
         return tmux.navigate(&existing.id);
     }
     let layout = match preset {
@@ -279,8 +290,7 @@ fn open_checkout(
     };
     git::validate_checkout(checkout)?;
     let occupied = sessions.iter().map(|s| s.name.clone()).collect();
-    let name = session_name(checkout, &occupied);
-    let target = Target::Checkout(checkout.clone());
+    let name = session_name(&target, &occupied);
     let id = tmux.create(&name, &target, &layout)?;
     tmux.navigate(&id)
 }
@@ -705,25 +715,28 @@ mod tests {
             linked: false,
         };
         assert_eq!(
-            session_name(&checkout, &HashSet::new()),
+            session_name(&Target::Checkout(checkout.clone()), &HashSet::new()),
             "same repo_日本-a_b"
         );
         checkout.linked = true;
         assert_eq!(
-            session_name(&checkout, &HashSet::new()),
+            session_name(&Target::Checkout(checkout.clone()), &HashSet::new()),
             "same repo_日本-a_b/tree"
         );
         checkout.branch = Some("feature".into());
         assert_eq!(
-            session_name(&checkout, &HashSet::new()),
+            session_name(&Target::Checkout(checkout.clone()), &HashSet::new()),
             "same repo_日本-a_b/tree"
         );
 
         checkout.repo_name = "bad:.\nname".into();
-        assert_eq!(session_name(&checkout, &HashSet::new()), "bad---name/tree");
+        assert_eq!(
+            session_name(&Target::Checkout(checkout.clone()), &HashSet::new()),
+            "bad---name/tree"
+        );
         checkout.repo_name = "same repo_日本-a_b".into();
         let collision = session_name(
-            &checkout,
+            &Target::Checkout(checkout),
             &HashSet::from(["same repo_日本-a_b/tree".into()]),
         );
         assert!(collision.starts_with("same repo_日本-a_b/tree-"));
@@ -831,7 +844,7 @@ mod tests {
     }
 
     #[test]
-    fn worktree_reuse_uses_metadata() {
+    fn target_reuse_requires_matching_kind_and_metadata() {
         let sessions = vec![
             Session {
                 id: "$1".into(),
@@ -868,10 +881,41 @@ mod tests {
             },
         ];
         assert_eq!(
-            session_for_worktree(&sessions, Path::new("/tmp/a"))
-                .unwrap()
-                .id,
+            session_for_target(
+                &sessions,
+                &Target::Checkout(Checkout {
+                    repo: "repo-a".into(),
+                    worktree: PathBuf::from("/tmp/a"),
+                    repo_name: "a".into(),
+                    branch: None,
+                    linked: false,
+                })
+            )
+            .unwrap()
+            .id,
             "$1"
         );
+
+        let bookmark = Target::Bookmark(PathBuf::from("/tmp/a"));
+        assert!(session_for_target(&sessions, &bookmark).is_none());
+        let mut bookmark_session = sessions[0].clone();
+        bookmark_session.id = "$4".into();
+        bookmark_session.kind = Some("bookmark".into());
+        assert_eq!(
+            session_for_target(&[bookmark_session], &bookmark)
+                .unwrap()
+                .id,
+            "$4"
+        );
+    }
+
+    #[test]
+    fn bookmark_session_names_hash_canonical_paths_on_collision() {
+        let first = Target::Bookmark(PathBuf::from("/one/notes"));
+        let second = Target::Bookmark(PathBuf::from("/two/notes"));
+        assert_eq!(session_name(&first, &HashSet::new()), "notes");
+        let name = session_name(&second, &HashSet::from(["notes".into()]));
+        assert!(name.starts_with("notes-"));
+        assert_eq!(name.len(), "notes-".len() + 10);
     }
 }
