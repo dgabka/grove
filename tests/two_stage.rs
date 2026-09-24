@@ -93,6 +93,9 @@ if [ "$count" = "$MUTATE_AT" ]; then
             rm -rf "$MUTATE_PATH/.git"
             git init --separate-git-dir "$TEST_DIR/replacement.git" "$MUTATE_PATH" >&2;;
         top) git -C "$MUTATE_PATH" config core.worktree ../..;;
+        file)
+            rm -rf "$MUTATE_PATH"
+            : > "$MUTATE_PATH";;
         *) exit 92;;
     esac
 fi
@@ -742,6 +745,107 @@ fn repository_and_worktree_picker_columns_align() {
         }
     }
     assert!(fixture.text("tmux.log").is_empty());
+}
+
+#[test]
+fn bookmarks_precede_repositories_and_open_as_independent_targets() {
+    let fixture = Fixture::new();
+    let first = fixture.dir.path().join("one/notes 界");
+    let second = fixture.dir.path().join("two/notes 界");
+    fs::create_dir_all(&first).unwrap();
+    fs::create_dir_all(&second).unwrap();
+    fs::write(
+        fixture.dir.path().join("config/grove/config.toml"),
+        format!(
+            "roots = [{:?}]\nbookmarks = [{:?}, {:?}]\n[[presets]]\nname = 'custom'\n",
+            fixture.dir.path().join("repos"),
+            first,
+            second
+        ),
+    )
+    .unwrap();
+
+    fixture.run(&["1", "0"], None, false);
+    let picker = fixture.text("picker-1.input");
+    assert!(picker.starts_with("0\t[bookmark]  notes 界"), "{picker}");
+    assert!(picker.contains("1\t[bookmark]  notes 界"), "{picker}");
+    assert!(picker.contains("2\t            ordinary"), "{picker}");
+    assert!(fixture.text("picker-2.args").contains("layout> "));
+    let log = fixture.text("tmux.log");
+    let second = second.canonicalize().unwrap();
+    assert!(
+        log.contains(&format!("-c\0{}\0", second.display())),
+        "{log}"
+    );
+    assert!(log.contains("@grove_kind\0626f6f6b6d61726b\0"), "{log}");
+    assert!(!log.contains("worktree> "), "{log}");
+
+    let sessions = "$old:notes 界::::::0\n".to_owned();
+    fixture.run_mutating(&[], &["1", "0"], None, &sessions, false, None);
+    let log = fixture.text("tmux.log");
+    assert!(log.contains("new-session"), "{log}");
+    assert!(!log.contains("attach-session\0-t\0$old\0"), "{log}");
+    assert!(log.contains("-s\0notes 界-"), "{log}");
+}
+
+#[test]
+fn bookmark_only_reuses_cancels_and_revalidates_before_creation() {
+    let fixture = Fixture::new();
+    let bookmark = fixture.dir.path().join("bookmark space 界");
+    fs::create_dir(&bookmark).unwrap();
+    fs::write(
+        fixture.dir.path().join("config/grove/config.toml"),
+        format!("roots = []\nbookmarks = [{bookmark:?}]\n[[presets]]\nname = 'custom'\n"),
+    )
+    .unwrap();
+
+    fixture.run(&["0", "cancel"], None, false);
+    assert!(!fixture.text("tmux.log").contains("new-session"));
+
+    let canonical = bookmark.canonicalize().unwrap();
+    let hex = canonical
+        .to_string_lossy()
+        .as_bytes()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    let sessions = format!("$bookmark:old::{hex}:{hex}:{hex}::626f6f6b6d61726b:0\n");
+    fixture.run_mutating(&[], &["0"], None, &sessions, false, None);
+    let log = fixture.text("tmux.log");
+    assert!(log.contains("attach-session\0-t\0$bookmark\0"), "{log}");
+    assert!(!log.contains("new-session"), "{log}");
+
+    let output = fixture.run_mutating(
+        &[],
+        &["0", "0"],
+        None,
+        "",
+        false,
+        Some((2, &canonical, "file")),
+    );
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("no longer an existing directory"));
+    assert!(!fixture.text("tmux.log").contains("new-session"));
+}
+
+#[test]
+fn bookmark_sessions_are_switchable_and_repo_filter_falls_back() {
+    let fixture = Fixture::new();
+    let output = fixture.run_session(
+        &["switch", "--repo"],
+        &["0"],
+        "$current:current::::::626f6f6b6d61726b:2\n$bookmark:notes::2f746d702f6e6f746573:6e6f746573:6e6f746573::626f6f6b6d61726b:1\n",
+        "$current",
+        "",
+        Some(true),
+    );
+    assert!(output.status.success(), "{output:?}");
+    assert!(fixture.text("picker-1.input").contains("\u{f02e}  notes"));
+    assert!(
+        fixture
+            .text("tmux.log")
+            .contains("switch-client\0-t\0$bookmark\0")
+    );
 }
 
 #[test]
