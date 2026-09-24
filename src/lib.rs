@@ -12,6 +12,7 @@ use std::{
     path::{Path, PathBuf},
     process::{Command, Stdio},
 };
+use target::Target;
 use tmux::{Session, Tmux};
 use unicode_width::UnicodeWidthStr;
 
@@ -279,7 +280,8 @@ fn open_checkout(
     git::validate_checkout(checkout)?;
     let occupied = sessions.iter().map(|s| s.name.clone()).collect();
     let name = session_name(checkout, &occupied);
-    let id = tmux.create(&name, checkout, &layout)?;
+    let target = Target::Checkout(checkout.clone());
+    let id = tmux.create(&name, &target, &layout)?;
     tmux.navigate(&id)
 }
 
@@ -606,6 +608,7 @@ mod tests {
             label_meta: Some("legacy  /home/ann/repo".into()),
             name_meta: Some("/home/ann/name".into()),
             branch: Some("/home/ann/branch".into()),
+            kind: None,
             activity: 0,
         };
         let homes = ["/home/ann".into()];
@@ -781,6 +784,7 @@ mod tests {
             label_meta: None,
             name_meta: None,
             branch: None,
+            kind: None,
             activity: 0,
         };
         let sessions = vec![
@@ -837,6 +841,7 @@ mod tests {
                 label_meta: None,
                 name_meta: None,
                 branch: None,
+                kind: None,
                 activity: 0,
             },
             Session {
@@ -847,6 +852,7 @@ mod tests {
                 label_meta: None,
                 name_meta: None,
                 branch: None,
+                kind: None,
                 activity: 0,
             },
             Session {
@@ -857,6 +863,7 @@ mod tests {
                 label_meta: None,
                 name_meta: None,
                 branch: None,
+                kind: None,
                 activity: 0,
             },
         ];

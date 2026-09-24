@@ -37,6 +37,13 @@ impl Target {
         }
     }
 
+    pub fn base_label(&self) -> String {
+        match self {
+            Self::Checkout(checkout) => checkout.base_label(),
+            Self::Bookmark(path) => format!("{}  {}", bookmark_name(path), path.display()),
+        }
+    }
+
     pub fn repository(&self) -> Option<&str> {
         match self {
             Self::Checkout(checkout) => Some(&checkout.repo),

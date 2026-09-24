@@ -1,6 +1,6 @@
 use crate::{
     config::{Pane, Preset, Window},
-    git::Checkout,
+    target::Target,
 };
 use anyhow::{Context, Result, bail};
 use std::{
@@ -49,6 +49,7 @@ pub struct Session {
     pub label_meta: Option<String>,
     pub name_meta: Option<String>,
     pub branch: Option<String>,
+    pub kind: Option<String>,
     pub(crate) activity: u64,
 }
 
@@ -60,7 +61,11 @@ impl Session {
     pub fn columns(&self, nerd_fonts: bool) -> [String; 4] {
         match (&self.name_meta, &self.worktree) {
             (Some(name), Some(path)) => [
-                String::new(),
+                if self.kind.as_deref() == Some("bookmark") {
+                    if nerd_fonts { "\u{f02e}" } else { "[bookmark]" }.into()
+                } else {
+                    String::new()
+                },
                 name.clone(),
                 path.clone(),
                 crate::branch_label(self.branch.as_deref(), nerd_fonts),
@@ -144,7 +149,7 @@ impl Tmux {
         let output = match self.refs(&[
             "list-sessions",
             "-F",
-            "#{session_id}:#{session_name}:#{@grove_repo}:#{@grove_worktree}:#{@grove_label}:#{@grove_name}:#{@grove_branch}:#{session_activity}",
+            "#{session_id}:#{session_name}:#{@grove_repo}:#{@grove_worktree}:#{@grove_label}:#{@grove_name}:#{@grove_branch}:#{@grove_kind}:#{session_activity}",
         ]) {
             Ok(output) => output,
             Err(error)
@@ -160,20 +165,31 @@ impl Tmux {
         let mut sessions = output
             .lines()
             .map(|line| {
-                let mut fields = line.splitn(8, ':');
+                let mut fields = line.splitn(9, ':');
                 let mut field = || fields.next().context("tmux returned invalid session data");
                 let id = field()?.to_owned();
                 let name = field()?.to_owned();
                 let option = |value: &str| (!value.is_empty()).then(|| unhex(value)).flatten();
+                let repo = option(field()?);
+                let worktree = option(field()?);
+                let label_meta = option(field()?);
+                let name_meta = option(field()?);
+                let branch = option(field()?);
+                let kind_or_activity = field()?;
+                let (kind, activity) = match fields.next() {
+                    Some(activity) => (option(kind_or_activity), activity),
+                    None => (None, kind_or_activity),
+                };
                 Ok(Session {
                     id,
                     name,
-                    repo: option(field()?),
-                    worktree: option(field()?),
-                    label_meta: option(field()?),
-                    name_meta: option(field()?),
-                    branch: option(field()?),
-                    activity: field()?
+                    repo,
+                    worktree,
+                    label_meta,
+                    name_meta,
+                    branch,
+                    kind,
+                    activity: activity
                         .parse()
                         .context("tmux returned invalid session activity")?,
                 })
@@ -232,19 +248,24 @@ impl Tmux {
         self.run(&args)
     }
 
-    pub fn create(&self, name: &str, checkout: &Checkout, preset: &Preset) -> Result<String> {
-        let cwd = checkout.worktree.to_string_lossy().into_owned();
-        let branch = checkout
-            .linked
-            .then(|| checkout.branch.clone().unwrap_or_else(|| "detached".into()));
+    pub fn create(&self, name: &str, target: &Target, preset: &Preset) -> Result<String> {
+        let cwd = target.cwd().to_string_lossy().into_owned();
         let mut metadata = vec![
-            ("@grove_repo", checkout.repo.clone()),
             ("@grove_worktree", cwd.clone()),
-            ("@grove_label", checkout.base_label()),
-            ("@grove_name", checkout.display_name()),
+            ("@grove_label", target.base_label()),
+            ("@grove_name", target.display_name()),
         ];
-        if let Some(branch) = branch {
-            metadata.push(("@grove_branch", branch));
+        match target {
+            Target::Checkout(checkout) => {
+                metadata.insert(0, ("@grove_repo", checkout.repo.clone()));
+                if checkout.linked {
+                    metadata.push((
+                        "@grove_branch",
+                        checkout.branch.clone().unwrap_or_else(|| "detached".into()),
+                    ));
+                }
+            }
+            Target::Bookmark(_) => metadata.push(("@grove_kind", "bookmark".into())),
         }
         self.create_layout(name, &cwd, &preset.windows, &metadata)
     }
@@ -353,7 +374,7 @@ impl Tmux {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::DefaultSession;
+    use crate::{config::DefaultSession, git::Checkout};
     use std::{fs, process::Command};
     use tempfile::TempDir;
 
@@ -458,7 +479,7 @@ mod tests {
         };
         let id = server
             .tmux
-            .create("grove-test", &checkout, &preset)
+            .create("grove-test", &Target::Checkout(checkout.clone()), &preset)
             .unwrap();
         let sessions = server.tmux.sessions().unwrap();
         assert_eq!(sessions.len(), 1);
@@ -513,6 +534,41 @@ mod tests {
     }
 
     #[test]
+    fn bookmark_metadata_round_trips_and_marks_sessions() {
+        let Some(server) = Server::new("") else {
+            return;
+        };
+        let parent = TempDir::new().unwrap();
+        let directory = parent.path().join("notes 界");
+        fs::create_dir(&directory).unwrap();
+        let target = Target::Bookmark(directory.canonicalize().unwrap());
+        let id = server
+            .tmux
+            .create("bookmark-test", &target, &Preset::shell())
+            .unwrap();
+        let session = server.tmux.sessions().unwrap().pop().unwrap();
+        assert_eq!(session.id, id);
+        assert_eq!(session.kind.as_deref(), Some("bookmark"));
+        assert_eq!(session.repo, None);
+        assert_eq!(session.branch, None);
+        assert_eq!(
+            session.worktree.as_deref(),
+            Some(target.cwd().to_string_lossy().as_ref())
+        );
+        assert_eq!(session.name_meta.as_deref(), Some("notes 界"));
+        assert_eq!(session.columns(true)[0], "\u{f02e}");
+        assert_eq!(session.columns(false)[0], "[bookmark]");
+        assert_eq!(
+            server
+                .tmux
+                .refs(&["list-panes", "-s", "-t", &id, "-F", "#{pane_current_path}"])
+                .unwrap()
+                .trim(),
+            target.cwd().to_string_lossy()
+        );
+    }
+
+    #[test]
     fn default_layout_has_no_metadata_and_preserves_argv() {
         let Some(server) = Server::new("set -g base-index 1\n") else {
             return;
@@ -559,6 +615,7 @@ mod tests {
         assert_eq!(session.label_meta, None);
         assert_eq!(session.name_meta, None);
         assert_eq!(session.branch, None);
+        assert_eq!(session.kind, None);
         let panes = server
             .tmux
             .refs(&["list-panes", "-s", "-t", &id, "-F", "#{pane_current_path}"])
@@ -608,6 +665,7 @@ mod tests {
             label_meta: Some("base".into()),
             name_meta: None,
             branch: Some("feature".into()),
+            kind: None,
             activity: 0,
         };
         assert_eq!(session.label(true), "base   feature");
@@ -648,6 +706,7 @@ mod tests {
                 label_meta: None,
                 name_meta: None,
                 branch: None,
+                kind: None,
                 activity: 1,
             },
             Session {
@@ -658,6 +717,7 @@ mod tests {
                 label_meta: None,
                 name_meta: None,
                 branch: None,
+                kind: None,
                 activity: 2,
             },
         ];
@@ -683,6 +743,7 @@ mod tests {
         assert_eq!(sessions[0].name_meta, None);
         assert_eq!(sessions[0].columns(true), ["", "foreign", "", ""]);
         assert_eq!(sessions[0].branch, None);
+        assert_eq!(sessions[0].kind, None);
     }
 
     #[test]
