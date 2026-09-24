@@ -1,5 +1,6 @@
 pub mod config;
 pub mod git;
+pub mod target;
 pub mod tmux;
 
 use anyhow::{Context, Result, bail};
