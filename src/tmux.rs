@@ -244,10 +244,6 @@ impl Tmux {
         }
     }
 
-    fn execute(&self, args: Vec<String>) -> Result<String> {
-        self.run(&args)
-    }
-
     pub fn create(&self, name: &str, target: &Target, preset: &Preset) -> Result<String> {
         let cwd = target.cwd().to_string_lossy().into_owned();
         let mut metadata = vec![
@@ -303,20 +299,20 @@ impl Tmux {
             if let Some(pane) = first.panes.first() {
                 Self::with_command(&mut new, pane);
             }
-            let created = self.execute(new)?;
+            let created = self.run(&new)?;
             let (session, window) = created
                 .trim_end()
                 .split_once('\t')
                 .context("tmux did not return session and window IDs")?;
             created_session = Some(session.to_owned());
-            self.execute(vec![
+            self.run(&[
                 "rename-window".into(),
                 "-t".into(),
                 window.into(),
                 first.name,
             ])?;
             for (key, value) in metadata {
-                self.execute(vec![
+                self.run(&[
                     "set-option".into(),
                     "-t".into(),
                     session.into(),
@@ -342,7 +338,7 @@ impl Tmux {
                 if let Some(pane) = window.panes.first() {
                     Self::with_command(&mut args, pane);
                 }
-                let id = self.execute(args)?;
+                let id = self.run(&args)?;
                 self.add_panes(id.trim_end(), &window.panes, &cwd_arg)?;
             }
             Ok(session.to_owned())
@@ -366,7 +362,7 @@ impl Tmux {
                 cwd.into(),
             ];
             Self::with_command(&mut args, pane);
-            self.execute(args)?;
+            self.run(&args)?;
         }
         Ok(())
     }

@@ -143,15 +143,7 @@ esac
         output
     }
 
-    fn run_mutating(
-        &self,
-        args: &[&str],
-        choices: &[&str],
-        reuse: Option<&Path>,
-        sessions: &str,
-        nerd_fonts: bool,
-        mutation: Option<(usize, &Path, &str)>,
-    ) -> Output {
+    fn prepare(&self, choices: &[&str]) {
         for entry in fs::read_dir(self.dir.path()).unwrap() {
             let entry = entry.unwrap();
             if entry.file_type().unwrap().is_file() {
@@ -161,6 +153,61 @@ esac
         for (i, choice) in choices.iter().enumerate() {
             fs::write(self.dir.path().join(format!("choice-{}", i + 1)), choice).unwrap();
         }
+    }
+
+    fn command(&self, args: &[&str]) -> Command {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_grove"));
+        command
+            .args(args)
+            .current_dir(self.dir.path())
+            .env(
+                "PATH",
+                format!(
+                    "{}:{}",
+                    self.dir.path().join("bin").display(),
+                    std::env::var("PATH").unwrap()
+                ),
+            )
+            .env("HOME", self.dir.path())
+            .env("XDG_CONFIG_HOME", self.dir.path().join("config"))
+            .env("TEST_DIR", self.dir.path())
+            .env(
+                "GROVE_TMUX_SOCKET",
+                format!(
+                    "grove-fake-{}",
+                    self.dir.path().file_name().unwrap().to_string_lossy()
+                ),
+            )
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env_remove("GIT_DIR")
+            .env_remove("GIT_WORK_TREE")
+            .env_remove("GIT_COMMON_DIR")
+            .env_remove("GROVE_CONFIG");
+        command
+    }
+
+    fn check_choices(&self, choices: &[&str]) {
+        assert_eq!(
+            self.text("count"),
+            if choices.is_empty() {
+                String::new()
+            } else {
+                choices.len().to_string()
+            }
+        );
+    }
+
+    fn run_mutating(
+        &self,
+        args: &[&str],
+        choices: &[&str],
+        reuse: Option<&Path>,
+        sessions: &str,
+        nerd_fonts: bool,
+        mutation: Option<(usize, &Path, &str)>,
+    ) -> Output {
+        self.prepare(choices);
         let config = self.dir.path().join("config/grove/config.toml");
         let text = fs::read_to_string(&config).unwrap();
         // Add the preference before the preset table, not inside it.
@@ -182,50 +229,18 @@ esac
             })
             .unwrap_or_default();
         let (stage, path, mutation) = mutation.unwrap_or((0, self.dir.path(), ""));
-        let output = Command::new(env!("CARGO_BIN_EXE_grove"))
-            .args(args)
-            .current_dir(self.dir.path())
-            .env(
-                "PATH",
-                format!(
-                    "{}:{}",
-                    self.dir.path().join("bin").display(),
-                    std::env::var("PATH").unwrap()
-                ),
-            )
-            .env("HOME", self.dir.path())
-            .env("XDG_CONFIG_HOME", self.dir.path().join("config"))
-            .env("TEST_DIR", self.dir.path())
+        let output = self
+            .command(args)
             .env("MUTATE_AT", stage.to_string())
             .env("MUTATE_PATH", path)
             .env("MUTATION", mutation)
-            .env(
-                "GROVE_TMUX_SOCKET",
-                format!(
-                    "grove-fake-{}",
-                    self.dir.path().file_name().unwrap().to_string_lossy()
-                ),
-            )
             .env("REUSE_WORKTREE", reuse)
             .env("TMUX_SESSIONS", sessions)
-            .env("GIT_CONFIG_GLOBAL", "/dev/null")
-            .env("GIT_CONFIG_NOSYSTEM", "1")
             .env_remove("TMUX")
             .env_remove("TMUX_PANE")
-            .env_remove("GIT_DIR")
-            .env_remove("GIT_WORK_TREE")
-            .env_remove("GIT_COMMON_DIR")
-            .env_remove("GROVE_CONFIG")
             .output()
             .unwrap();
-        assert_eq!(
-            self.text("count"),
-            if choices.is_empty() {
-                String::new()
-            } else {
-                choices.len().to_string()
-            }
-        );
+        self.check_choices(choices);
         output
     }
 
@@ -238,50 +253,16 @@ esac
         fail_tmux: &str,
         tmux_pane: Option<bool>,
     ) -> Output {
-        for entry in fs::read_dir(self.dir.path()).unwrap() {
-            let entry = entry.unwrap();
-            if entry.file_type().unwrap().is_file() {
-                fs::remove_file(entry.path()).unwrap();
-            }
-        }
-        for (i, choice) in choices.iter().enumerate() {
-            fs::write(self.dir.path().join(format!("choice-{}", i + 1)), choice).unwrap();
-        }
-        let mut command = Command::new(env!("CARGO_BIN_EXE_grove"));
+        self.prepare(choices);
+        let mut command = self.command(args);
         command
-            .args(args)
-            .current_dir(self.dir.path())
-            .env(
-                "PATH",
-                format!(
-                    "{}:{}",
-                    self.dir.path().join("bin").display(),
-                    std::env::var("PATH").unwrap()
-                ),
-            )
-            .env("HOME", self.dir.path())
-            .env("XDG_CONFIG_HOME", self.dir.path().join("config"))
-            .env("TEST_DIR", self.dir.path())
             .env("MUTATE_AT", "0")
             .env("MUTATE_PATH", self.dir.path())
             .env("MUTATION", "")
-            .env(
-                "GROVE_TMUX_SOCKET",
-                format!(
-                    "grove-fake-{}",
-                    self.dir.path().file_name().unwrap().to_string_lossy()
-                ),
-            )
             .env("TMUX_SESSIONS", sessions)
             .env("CURRENT_SESSION", current)
             .env("FAIL_TMUX", fail_tmux)
-            .env("GIT_CONFIG_GLOBAL", "/dev/null")
-            .env("GIT_CONFIG_NOSYSTEM", "1")
-            .env_remove("REUSE_WORKTREE")
-            .env_remove("GIT_DIR")
-            .env_remove("GIT_WORK_TREE")
-            .env_remove("GIT_COMMON_DIR")
-            .env_remove("GROVE_CONFIG");
+            .env_remove("REUSE_WORKTREE");
         if let Some(has_pane) = tmux_pane {
             command.env("TMUX", "fake,0,0");
             if has_pane {
@@ -293,14 +274,7 @@ esac
             command.env_remove("TMUX").env_remove("TMUX_PANE");
         }
         let output = command.output().unwrap();
-        assert_eq!(
-            self.text("count"),
-            if choices.is_empty() {
-                String::new()
-            } else {
-                choices.len().to_string()
-            }
-        );
+        self.check_choices(choices);
         output
     }
 

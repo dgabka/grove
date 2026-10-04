@@ -44,20 +44,6 @@ impl Target {
         }
     }
 
-    pub fn repository(&self) -> Option<&str> {
-        match self {
-            Self::Checkout(checkout) => Some(&checkout.repo),
-            Self::Bookmark(_) => None,
-        }
-    }
-
-    pub fn branch(&self) -> Option<&str> {
-        match self {
-            Self::Checkout(checkout) => checkout.branch.as_deref(),
-            Self::Bookmark(_) => None,
-        }
-    }
-
     pub fn kind(&self) -> &'static str {
         match self {
             Self::Checkout(_) => "checkout",
@@ -123,15 +109,11 @@ mod tests {
         let target = Target::Checkout(checkout.clone());
         assert_eq!(target.cwd(), checkout.worktree);
         assert_eq!(target.display_name(), "example");
-        assert_eq!(target.repository(), Some("/repos/example/.git"));
-        assert_eq!(target.branch(), Some("main"));
         assert_eq!(target.kind(), "checkout");
 
         let target = Target::Bookmark(PathBuf::from("/tmp/notes"));
         assert_eq!(target.cwd(), Path::new("/tmp/notes"));
         assert_eq!(target.display_name(), "notes");
-        assert_eq!(target.repository(), None);
-        assert_eq!(target.branch(), None);
         assert_eq!(target.kind(), "bookmark");
     }
 
