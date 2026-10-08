@@ -397,8 +397,19 @@ pub fn switch(tmux: &Tmux, repo_only: bool) -> Result<()> {
     let current = tmux.current_session()?;
     let sessions = selectable_sessions(tmux.sessions()?, current.as_deref(), repo_only);
     if sessions.is_empty() {
-        bail!("no matching tmux sessions")
-    };
+        if std::env::var_os("TMUX").is_some() && std::env::var_os("TMUX_PANE").is_none() {
+            println!("No other tmux sessions. Press Enter to close.");
+            std::io::stdout()
+                .flush()
+                .context("flush empty session message")?;
+            let mut acknowledgement = String::new();
+            std::io::stdin()
+                .read_line(&mut acknowledgement)
+                .context("read empty session acknowledgement")?;
+            return Ok(());
+        }
+        bail!("no matching tmux sessions");
+    }
     let choices = aligned_choices(sessions.iter().map(|session| session.columns(nerd_fonts)));
     if let Some(id) = choose(&choices, "session> ")? {
         let session = sessions

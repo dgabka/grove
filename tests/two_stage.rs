@@ -1,8 +1,9 @@
 use std::{
     fs,
+    io::{BufRead, BufReader, Write},
     os::unix::fs::PermissionsExt,
     path::{Path, PathBuf},
-    process::{Command, Output},
+    process::{Command, Output, Stdio},
 };
 use tempfile::TempDir;
 
@@ -244,16 +245,14 @@ esac
         output
     }
 
-    fn run_session(
+    fn session_command(
         &self,
         args: &[&str],
-        choices: &[&str],
         sessions: &str,
         current: &str,
         fail_tmux: &str,
         tmux_pane: Option<bool>,
-    ) -> Output {
-        self.prepare(choices);
+    ) -> Command {
         let mut command = self.command(args);
         command
             .env("MUTATE_AT", "0")
@@ -273,7 +272,23 @@ esac
         } else {
             command.env_remove("TMUX").env_remove("TMUX_PANE");
         }
-        let output = command.output().unwrap();
+        command
+    }
+
+    fn run_session(
+        &self,
+        args: &[&str],
+        choices: &[&str],
+        sessions: &str,
+        current: &str,
+        fail_tmux: &str,
+        tmux_pane: Option<bool>,
+    ) -> Output {
+        self.prepare(choices);
+        let output = self
+            .session_command(args, sessions, current, fail_tmux, tmux_pane)
+            .output()
+            .unwrap();
         self.check_choices(choices);
         output
     }
@@ -485,6 +500,50 @@ fn switch_excludes_current_session_from_a_tmux_popup() {
     let log = fixture.text("tmux.log");
     assert!(log.contains("display-message\0-p\0#{session_id}\0"));
     assert!(log.contains("switch-client\0-t\0$target\0"));
+}
+
+#[test]
+fn empty_popup_switch_waits_for_acknowledgement_without_picker_or_navigation() {
+    for args in [&["switch"][..], &["switch", "--repo"][..]] {
+        let fixture = Fixture::new();
+        let mut child = fixture
+            .session_command(
+                args,
+                "$current:current::::::2\n",
+                "$current",
+                "",
+                Some(false),
+            )
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let mut message = String::new();
+        BufReader::new(child.stdout.take().unwrap())
+            .read_line(&mut message)
+            .unwrap();
+        assert_eq!(message, "No other tmux sessions. Press Enter to close.\n");
+        assert!(child.try_wait().unwrap().is_none());
+        child.stdin.take().unwrap().write_all(b"\n").unwrap();
+        assert!(child.wait().unwrap().success());
+        assert!(!fixture.dir.path().join("count").exists());
+        assert!(!fixture.text("tmux.log").contains("switch-client"));
+    }
+}
+
+#[test]
+fn empty_switch_in_tmux_pane_still_errors() {
+    let fixture = Fixture::new();
+    let output = fixture.run_session(
+        &["switch"],
+        &[],
+        "$current:current::::::2\n",
+        "$current",
+        "",
+        Some(true),
+    );
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("no matching tmux sessions"));
 }
 
 #[test]
